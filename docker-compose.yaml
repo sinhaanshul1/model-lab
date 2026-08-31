@@ -24,12 +24,36 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    
+    healthcheck:
+      test:
+        ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     command:
       [
         "sh",
         "-c",
         "python -m modellab.storage.initialize && fastapi run src/modellab/api/main.py --host 0.0.0.0 --port 8000",
+      ]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      MODELLAB_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/modellab_dev
+      MODELLAB_MOCK_MODEL_URL: http://api:8000/v1/mock-model/chat/completions
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command:
+      [
+        "sh",
+        "-c",
+        "python -m modellab.storage.initialize && python -m modellab.worker.benchmark_worker",
       ]
 volumes:
   postgres_data:

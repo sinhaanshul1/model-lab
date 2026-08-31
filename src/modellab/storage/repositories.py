@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -106,6 +107,64 @@ def create_evaluation_run(session: Session, payload: EvaluationRunCreate) -> Eva
         status=EvaluationRunStatus.QUEUED.value,
     )
     session.add(record)
+    session.commit()
+    session.refresh(record)
+    return to_evaluation_run(record)
+
+
+def claim_next_evaluation_run(session: Session) -> EvaluationRun | None:
+    """Atomically claim the oldest queued run for one benchmark worker.
+
+    The row lock is held only while its status changes to ``running``. A
+    worker never holds a database lock while performing a benchmark.
+    """
+
+    record = session.scalars(
+        select(EvaluationRunRecord)
+        .where(EvaluationRunRecord.status == EvaluationRunStatus.QUEUED.value)
+        .order_by(EvaluationRunRecord.created_at, EvaluationRunRecord.id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ).first()
+    if record is None:
+        return None
+
+    record.status = EvaluationRunStatus.RUNNING.value
+    record.started_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(record)
+    return to_evaluation_run(record)
+
+
+def complete_evaluation_run(
+    session: Session, run_id: UUID, metrics: EvaluationMetrics
+) -> EvaluationRun | None:
+    """Persist benchmark metrics and mark a claimed run as succeeded."""
+
+    record = session.get(EvaluationRunRecord, run_id)
+    if record is None or record.status != EvaluationRunStatus.RUNNING.value:
+        return None
+
+    record.status = EvaluationRunStatus.SUCCEEDED.value
+    record.successful_requests = metrics.successful_requests
+    record.p95_ttft_ms = metrics.p95_ttft_ms
+    record.output_tokens_per_second = metrics.output_tokens_per_second
+    record.quality_score = metrics.quality_score
+    record.finished_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(record)
+    return to_evaluation_run(record)
+
+
+def fail_evaluation_run(session: Session, run_id: UUID) -> EvaluationRun | None:
+    """Mark a claimed run as failed after the worker logs its diagnostic."""
+
+    record = session.get(EvaluationRunRecord, run_id)
+    if record is None or record.status != EvaluationRunStatus.RUNNING.value:
+        return None
+
+    record.status = EvaluationRunStatus.FAILED.value
+    record.finished_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(record)
     return to_evaluation_run(record)
