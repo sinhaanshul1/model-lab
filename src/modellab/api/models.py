@@ -105,7 +105,9 @@ class ModelDeploymentCreate(BaseModel):
 
 class ModelDeploymentRequest(BaseModel):
     provider: Literal["mock"] = "mock"
-    lifecycle_policy: DeploymentLifecyclePolicy = DeploymentLifecyclePolicy.EPHEMERAL
+    lifecycle_policy: Literal[DeploymentLifecyclePolicy.EPHEMERAL] = (
+        DeploymentLifecyclePolicy.EPHEMERAL
+    )
 
 
 class ModelDeployment(BaseModel):
