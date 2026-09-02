@@ -12,7 +12,15 @@ from collections.abc import Sequence
 import httpx
 from sqlalchemy.orm import Session, sessionmaker
 
-from modellab.api.models import EvaluationMetrics, EvaluationRun, ModelProfile, ServingEngine
+from modellab.api.models import (
+    DeploymentLifecyclePolicy,
+    EvaluationMetrics,
+    EvaluationRun,
+    ModelDeploymentStatus,
+    ModelProfile,
+    ServingEngine,
+)
+from modellab.deployments import DeploymentManager, MockDeploymentProvider
 from modellab.storage import repositories
 from modellab.storage.database import get_session_factory
 
@@ -38,12 +46,12 @@ class BenchmarkWorker:
     def __init__(
         self,
         session_factory: sessionmaker[Session],
-        mock_model_url: str,
+        deployment_manager: DeploymentManager,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._mock_model_url = mock_model_url
+        self._deployment_manager = deployment_manager
         self._transport = transport
 
     async def process_next_run(self) -> bool:
@@ -54,17 +62,30 @@ class BenchmarkWorker:
         if run is None:
             return False
 
+        deployment = None
         try:
             with self._session_factory() as session:
                 profile = repositories.get_model_profile(session, run.model_profile_id)
+                if run.model_deployment_id is not None:
+                    deployment = repositories.get_model_deployment(
+                        session, run.model_deployment_id
+                    )
             if profile is None:
                 raise BenchmarkExecutionError("The evaluation run's model profile no longer exists.")
+            if deployment is None:
+                raise BenchmarkExecutionError("The evaluation run's model deployment no longer exists.")
+            if deployment.status is not ModelDeploymentStatus.READY:
+                raise BenchmarkExecutionError("The evaluation run's model deployment is not ready.")
+            if deployment.endpoint_url is None:
+                raise BenchmarkExecutionError("The model deployment has no inference endpoint.")
             if profile.engine is not ServingEngine.MOCK:
                 raise BenchmarkExecutionError(
                     "The first benchmark worker supports only profiles using the mock engine."
                 )
 
-            metrics = await self._benchmark_mock_profile(run, profile)
+            metrics = await self._benchmark_mock_profile(
+                run, profile, deployment.endpoint_url
+            )
             with self._session_factory() as session:
                 completed_run = repositories.complete_evaluation_run(session, run.id, metrics)
             if completed_run is None:
@@ -74,6 +95,16 @@ class BenchmarkWorker:
             LOGGER.exception("Evaluation run %s failed.", run.id)
             with self._session_factory() as session:
                 repositories.fail_evaluation_run(session, run.id)
+        finally:
+            if (
+                deployment is not None
+                and deployment.status is ModelDeploymentStatus.READY
+                and deployment.lifecycle_policy is DeploymentLifecyclePolicy.EPHEMERAL
+            ):
+                try:
+                    await self._deployment_manager.stop(deployment.id)
+                except Exception:
+                    LOGGER.exception("Could not clean up deployment %s.", deployment.id)
         return True
 
     async def run_forever(self, poll_interval_seconds: float) -> None:
@@ -85,7 +116,7 @@ class BenchmarkWorker:
                 await asyncio.sleep(poll_interval_seconds)
 
     async def _benchmark_mock_profile(
-        self, run: EvaluationRun, profile: ModelProfile
+        self, run: EvaluationRun, profile: ModelProfile, endpoint_url: str
     ) -> EvaluationMetrics:
         semaphore = asyncio.Semaphore(min(run.concurrency, run.request_count))
         started_at = time.perf_counter()
@@ -95,7 +126,9 @@ class BenchmarkWorker:
         ) as client:
             responses = await asyncio.gather(
                 *(
-                    self._send_request(client, semaphore, profile, request_index)
+                    self._send_request(
+                        client, semaphore, profile, endpoint_url, request_index
+                    )
                     for request_index in range(run.request_count)
                 ),
                 return_exceptions=True,
@@ -125,6 +158,7 @@ class BenchmarkWorker:
         client: httpx.AsyncClient,
         semaphore: asyncio.Semaphore,
         profile: ModelProfile,
+        endpoint_url: str,
         request_index: int,
     ) -> tuple[float, int]:
         prompt = SMOKE_TEST_PROMPTS[request_index % len(SMOKE_TEST_PROMPTS)]
@@ -139,7 +173,7 @@ class BenchmarkWorker:
         }
         async with semaphore:
             request_started_at = time.perf_counter()
-            response = await client.post(self._mock_model_url, json=payload)
+            response = await client.post(endpoint_url, json=payload)
             elapsed_ms = (time.perf_counter() - request_started_at) * 1_000
         response.raise_for_status()
         completion_tokens = int(response.json()["usage"]["completion_tokens"])
@@ -157,10 +191,16 @@ def _p95(samples: Sequence[float]) -> float:
 
 def main() -> None:
     logging.basicConfig(level=os.getenv("MODELLAB_LOG_LEVEL", "INFO"))
-    worker = BenchmarkWorker(
-        get_session_factory(),
-        os.getenv("MODELLAB_MOCK_MODEL_URL", DEFAULT_MOCK_MODEL_URL),
+    session_factory = get_session_factory()
+    deployment_manager = DeploymentManager(
+        session_factory,
+        {
+            "mock": MockDeploymentProvider(
+                os.getenv("MODELLAB_MOCK_MODEL_URL", DEFAULT_MOCK_MODEL_URL)
+            )
+        },
     )
+    worker = BenchmarkWorker(session_factory, deployment_manager)
     poll_interval_seconds = float(
         os.getenv("MODELLAB_WORKER_POLL_INTERVAL_SECONDS", DEFAULT_POLL_INTERVAL_SECONDS)
     )

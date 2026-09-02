@@ -14,10 +14,12 @@ from modellab.api.models import (
     EvaluationRunCreate,
     EvaluationRunStatus,
     ModelDeploymentCreate,
+    ModelDeploymentStatus,
     ModelProfileCreate,
     ServingEngine,
 )
 from modellab.storage import repositories
+from modellab.deployments import DeploymentManager, MockDeploymentProvider
 from modellab.storage.database import create_schema, get_session_factory
 from modellab.worker.benchmark_worker import BenchmarkWorker
 
@@ -39,6 +41,13 @@ def _require_dedicated_test_database() -> str:
 @pytest.fixture(scope="module", autouse=True)
 def schema() -> None:
     create_schema(_require_dedicated_test_database())
+
+
+def _deployment_manager() -> DeploymentManager:
+    return DeploymentManager(
+        get_session_factory(_require_dedicated_test_database()),
+        {"mock": MockDeploymentProvider("http://mock-model/v1/chat/completions")},
+    )
 
 
 def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID, UUID]:
@@ -64,6 +73,7 @@ def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID, UUID
                 concurrency=2,
             ),
         )
+    asyncio.run(_deployment_manager().start(deployment.id))
     return profile.id, deployment.id, run.id
 
 
@@ -126,7 +136,7 @@ def test_worker_completes_a_queued_mock_evaluation() -> None:
     session_factory = get_session_factory(_require_dedicated_test_database())
     worker = BenchmarkWorker(
         session_factory,
-        "http://mock-model/v1/chat/completions",
+        _deployment_manager(),
         transport=httpx.MockTransport(_success_response),
     )
 
@@ -142,6 +152,10 @@ def test_worker_completes_a_queued_mock_evaluation() -> None:
         assert completed_run.metrics.successful_requests == 4
         assert completed_run.metrics.p95_ttft_ms is not None
         assert completed_run.metrics.output_tokens_per_second is not None
+        with session_factory() as session:
+            deployment = repositories.get_model_deployment(session, deployment_id)
+        assert deployment is not None
+        assert deployment.status is ModelDeploymentStatus.STOPPED
     finally:
         _cleanup(profile_id, deployment_id, [run_id])
 
@@ -151,7 +165,7 @@ def test_worker_marks_a_run_failed_when_mock_requests_fail() -> None:
     session_factory = get_session_factory(_require_dedicated_test_database())
     worker = BenchmarkWorker(
         session_factory,
-        "http://mock-model/v1/chat/completions",
+        _deployment_manager(),
         transport=httpx.MockTransport(_failure_response),
     )
 
@@ -163,5 +177,9 @@ def test_worker_marks_a_run_failed_when_mock_requests_fail() -> None:
         assert failed_run is not None
         assert failed_run.status is EvaluationRunStatus.FAILED
         assert failed_run.finished_at is not None
+        with session_factory() as session:
+            deployment = repositories.get_model_deployment(session, deployment_id)
+        assert deployment is not None
+        assert deployment.status is ModelDeploymentStatus.STOPPED
     finally:
         _cleanup(profile_id, deployment_id, [run_id])
