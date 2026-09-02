@@ -20,13 +20,12 @@ from modellab.api.models import (
     ModelProfile,
     ServingEngine,
 )
-from modellab.deployments import DeploymentManager, MockDeploymentProvider
+from modellab.deployments import DeploymentManager, build_deployment_providers
 from modellab.storage import repositories
 from modellab.storage.database import get_session_factory
 
 
 LOGGER = logging.getLogger(__name__)
-DEFAULT_MOCK_MODEL_URL = "http://127.0.0.1:8000/v1/mock-model/chat/completions"
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 REQUEST_TIMEOUT_SECONDS = 30.0
 SMOKE_TEST_PROMPTS = (
@@ -78,12 +77,12 @@ class BenchmarkWorker:
                 raise BenchmarkExecutionError("The evaluation run's model deployment is not ready.")
             if deployment.endpoint_url is None:
                 raise BenchmarkExecutionError("The model deployment has no inference endpoint.")
-            if profile.engine is not ServingEngine.MOCK:
+            if profile.engine not in {ServingEngine.MOCK, ServingEngine.VLLM}:
                 raise BenchmarkExecutionError(
-                    "The first benchmark worker supports only profiles using the mock engine."
+                    "The benchmark worker requires an OpenAI-compatible mock or vLLM engine."
                 )
 
-            metrics = await self._benchmark_mock_profile(
+            metrics = await self._benchmark_openai_compatible_profile(
                 run, profile, deployment.endpoint_url
             )
             with self._session_factory() as session:
@@ -115,7 +114,7 @@ class BenchmarkWorker:
             if not processed_run:
                 await asyncio.sleep(poll_interval_seconds)
 
-    async def _benchmark_mock_profile(
+    async def _benchmark_openai_compatible_profile(
         self, run: EvaluationRun, profile: ModelProfile, endpoint_url: str
     ) -> EvaluationMetrics:
         semaphore = asyncio.Semaphore(min(run.concurrency, run.request_count))
@@ -192,14 +191,7 @@ def _p95(samples: Sequence[float]) -> float:
 def main() -> None:
     logging.basicConfig(level=os.getenv("MODELLAB_LOG_LEVEL", "INFO"))
     session_factory = get_session_factory()
-    deployment_manager = DeploymentManager(
-        session_factory,
-        {
-            "mock": MockDeploymentProvider(
-                os.getenv("MODELLAB_MOCK_MODEL_URL", DEFAULT_MOCK_MODEL_URL)
-            )
-        },
-    )
+    deployment_manager = DeploymentManager(session_factory, build_deployment_providers())
     worker = BenchmarkWorker(session_factory, deployment_manager)
     poll_interval_seconds = float(
         os.getenv("MODELLAB_WORKER_POLL_INTERVAL_SECONDS", DEFAULT_POLL_INTERVAL_SECONDS)

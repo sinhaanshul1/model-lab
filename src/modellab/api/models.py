@@ -99,12 +99,12 @@ class ModelProfile(ModelProfileCreate):
 
 class ModelDeploymentCreate(BaseModel):
     model_profile_id: UUID
-    provider: Literal["mock"] = "mock"
+    provider: Literal["mock", "docker"] = "mock"
     lifecycle_policy: DeploymentLifecyclePolicy = DeploymentLifecyclePolicy.EPHEMERAL
 
 
 class ModelDeploymentRequest(BaseModel):
-    provider: Literal["mock"] = "mock"
+    provider: Literal["mock", "docker"] = "mock"
     lifecycle_policy: Literal[DeploymentLifecyclePolicy.EPHEMERAL] = (
         DeploymentLifecyclePolicy.EPHEMERAL
     )

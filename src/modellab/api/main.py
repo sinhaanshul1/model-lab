@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
-import os
 from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, HTTPException, status
@@ -26,7 +25,7 @@ from modellab.api.models import (
 )
 from modellab.storage import repositories
 from modellab.storage.database import get_session, get_session_factory
-from modellab.deployments import DeploymentManager, MockDeploymentProvider
+from modellab.deployments import DeploymentManager, build_deployment_providers
 from modellab.deployments.manager import DeploymentLifecycleError
 
 
@@ -36,18 +35,8 @@ app = FastAPI(
     description="Configuration and evaluation-run control plane for LLM serving.",
 )
 
-DEFAULT_MOCK_DEPLOYMENT_URL = "http://127.0.0.1:8000/v1/mock-model/chat/completions"
-
-
 def get_deployment_manager() -> DeploymentManager:
-    return DeploymentManager(
-        get_session_factory(),
-        {
-            "mock": MockDeploymentProvider(
-                os.getenv("MODELLAB_MOCK_MODEL_URL", DEFAULT_MOCK_DEPLOYMENT_URL)
-            )
-        },
-    )
+    return DeploymentManager(get_session_factory(), build_deployment_providers())
 
 def deterministic_mock_completion(payload: MockChatCompletionRequest) -> MockChatCompletion:
     """Return a repeatable response for the same request payload.
@@ -178,6 +167,11 @@ async def create_model_deployment(
 ) -> ModelDeployment:
     if repositories.get_model_profile(session, profile_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+    if not manager.supports(payload.provider):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Deployment provider is not enabled: {payload.provider}",
+        )
     deployment = repositories.create_model_deployment(
         session,
         ModelDeploymentCreate(

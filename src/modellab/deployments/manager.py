@@ -24,6 +24,9 @@ class DeploymentManager:
         self._session_factory = session_factory
         self._providers = providers
 
+    def supports(self, provider: str) -> bool:
+        return provider in self._providers
+
     async def start(self, deployment_id: UUID) -> ModelDeployment:
         with self._session_factory() as session:
             deployment = repositories.mark_model_deployment_starting(session, deployment_id)
@@ -37,6 +40,7 @@ class DeploymentManager:
         if provider is None:
             return self._fail(deployment_id, f"Unsupported provider: {deployment.provider}")
 
+        handle: DeploymentHandle | None = None
         try:
             handle = await provider.start(profile, deployment)
             if not await provider.health(handle):
@@ -52,6 +56,11 @@ class DeploymentManager:
                 raise DeploymentLifecycleError("Deployment could not be marked ready.")
             return ready
         except Exception as exc:
+            if handle is not None:
+                try:
+                    await provider.stop(handle)
+                except Exception:
+                    pass
             return self._fail(deployment_id, str(exc))
 
     async def stop(self, deployment_id: UUID) -> ModelDeployment:
