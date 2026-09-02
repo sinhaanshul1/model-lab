@@ -19,6 +19,7 @@ services:
       dockerfile: Dockerfile.api
     environment:
       MODELLAB_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/modellab_dev
+      MODELLAB_MOCK_MODEL_URL: http://api:8000/v1/mock-model/chat/completions
     ports:
       - "8000:8000"
     depends_on:
@@ -57,3 +58,7 @@ services:
       ]
 volumes:
   postgres_data:
+
+networks:
+  default:
+    name: modellab-runtime

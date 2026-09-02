@@ -1,0 +1,18 @@
+# Explicit opt-in: access to the Docker socket grants container-management
+# privileges and is unnecessary for the default mock deployment provider.
+services:
+  api:
+    environment:
+      MODELLAB_DOCKER_PROVIDER_ENABLED: "true"
+      MODELLAB_DOCKER_NETWORK: modellab-runtime
+      MODELLAB_VLLM_IMAGE: ${MODELLAB_VLLM_IMAGE:?Set a pinned vLLM image tag}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  worker:
+    environment:
+      MODELLAB_DOCKER_PROVIDER_ENABLED: "true"
+      MODELLAB_DOCKER_NETWORK: modellab-runtime
+      MODELLAB_VLLM_IMAGE: ${MODELLAB_VLLM_IMAGE:?Set a pinned vLLM image tag}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
