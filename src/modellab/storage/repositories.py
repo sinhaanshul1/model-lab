@@ -13,11 +13,18 @@ from modellab.api.models import (
     EvaluationRun,
     EvaluationRunCreate,
     EvaluationRunStatus,
+    ModelDeployment,
+    ModelDeploymentCreate,
+    ModelDeploymentStatus,
     ModelProfile,
     ModelProfileCreate,
     ModelProfileStatus,
 )
-from modellab.storage.orm_models import EvaluationRunRecord, ModelProfileRecord
+from modellab.storage.orm_models import (
+    EvaluationRunRecord,
+    ModelDeploymentRecord,
+    ModelProfileRecord,
+)
 
 
 def to_model_profile(record: ModelProfileRecord) -> ModelProfile:
@@ -58,6 +65,7 @@ def to_evaluation_run(record: EvaluationRunRecord) -> EvaluationRun:
     return EvaluationRun(
         id=record.id,
         model_profile_id=record.model_profile_id,
+        model_deployment_id=record.model_deployment_id,
         workload_name=record.workload_name,
         request_count=record.request_count,
         concurrency=record.concurrency,
@@ -98,9 +106,67 @@ def list_model_profiles(session: Session) -> list[ModelProfile]:
     return [to_model_profile(record) for record in records]
 
 
-def create_evaluation_run(session: Session, payload: EvaluationRunCreate) -> EvaluationRun:
-    record = EvaluationRunRecord(
+def to_model_deployment(record: ModelDeploymentRecord) -> ModelDeployment:
+    return ModelDeployment(
+        id=record.id,
+        model_profile_id=record.model_profile_id,
+        provider=record.provider,
+        lifecycle_policy=record.lifecycle_policy,
+        status=record.status,
+        runtime_id=record.runtime_id,
+        endpoint_url=record.endpoint_url,
+        failure_reason=record.failure_reason,
+        created_at=record.created_at,
+        ready_at=record.ready_at,
+        stopped_at=record.stopped_at,
+    )
+
+
+def create_model_deployment(
+    session: Session, payload: ModelDeploymentCreate
+) -> ModelDeployment:
+    record = ModelDeploymentRecord(
         model_profile_id=payload.model_profile_id,
+        provider=payload.provider,
+        lifecycle_policy=payload.lifecycle_policy.value,
+        status=ModelDeploymentStatus.PENDING.value,
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
+def get_model_deployment(session: Session, deployment_id: UUID) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    return to_model_deployment(record) if record is not None else None
+
+
+def list_model_deployments(session: Session) -> list[ModelDeployment]:
+    records = session.scalars(
+        select(ModelDeploymentRecord).order_by(
+            ModelDeploymentRecord.created_at, ModelDeploymentRecord.id
+        )
+    ).all()
+    return [to_model_deployment(record) for record in records]
+
+
+def delete_model_deployment(session: Session, deployment_id: UUID) -> bool:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None:
+        return False
+    session.delete(record)
+    session.commit()
+    return True
+
+
+def create_evaluation_run(session: Session, payload: EvaluationRunCreate) -> EvaluationRun:
+    deployment = session.get(ModelDeploymentRecord, payload.model_deployment_id)
+    if deployment is None:
+        raise ValueError("Model deployment not found")
+    record = EvaluationRunRecord(
+        model_profile_id=deployment.model_profile_id,
+        model_deployment_id=deployment.id,
         workload_name=payload.workload_name,
         request_count=payload.request_count,
         concurrency=payload.concurrency,

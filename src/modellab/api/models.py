@@ -29,6 +29,21 @@ class EvaluationRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class ModelDeploymentStatus(StrEnum):
+    PENDING = "pending"
+    STARTING = "starting"
+    READY = "ready"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class DeploymentLifecyclePolicy(StrEnum):
+    EPHEMERAL = "ephemeral"
+    PERSISTENT = "persistent"
+    IDLE_TIMEOUT = "idle_timeout"
+
+
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
     content: str = Field(min_length=1, max_length=100_000)
@@ -82,8 +97,28 @@ class ModelProfile(ModelProfileCreate):
     created_at: datetime
 
 
-class EvaluationRunCreate(BaseModel):
+class ModelDeploymentCreate(BaseModel):
     model_profile_id: UUID
+    provider: Literal["mock"] = "mock"
+    lifecycle_policy: DeploymentLifecyclePolicy = DeploymentLifecyclePolicy.EPHEMERAL
+
+
+class ModelDeployment(BaseModel):
+    id: UUID
+    model_profile_id: UUID
+    provider: str
+    lifecycle_policy: DeploymentLifecyclePolicy
+    status: ModelDeploymentStatus
+    runtime_id: str | None = None
+    endpoint_url: str | None = None
+    failure_reason: str | None = None
+    created_at: datetime
+    ready_at: datetime | None = None
+    stopped_at: datetime | None = None
+
+
+class EvaluationRunCreate(BaseModel):
+    model_deployment_id: UUID
     workload_name: str = Field(default="smoke-test", min_length=1, max_length=100)
     request_count: int = Field(default=10, ge=1, le=100_000)
     concurrency: int = Field(default=1, ge=1, le=10_000)
@@ -100,6 +135,7 @@ class EvaluationMetrics(BaseModel):
 class EvaluationRun(BaseModel):
     id: UUID
     model_profile_id: UUID
+    model_deployment_id: UUID | None = None
     workload_name: str
     request_count: int
     concurrency: int

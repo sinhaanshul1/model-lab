@@ -11,7 +11,12 @@ import os
 import pytest
 from sqlalchemy.engine import make_url
 
-from modellab.api.models import EvaluationRunCreate, ModelProfileCreate, ServingEngine
+from modellab.api.models import (
+    EvaluationRunCreate,
+    ModelDeploymentCreate,
+    ModelProfileCreate,
+    ServingEngine,
+)
 from modellab.storage import repositories
 from modellab.storage.database import create_schema, get_session_factory
 
@@ -44,6 +49,7 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
     session_factory = get_session_factory(database_url)
     profile_id = None
     run_id = None
+    deployment_id = None
 
     try:
         with session_factory() as session:
@@ -61,6 +67,11 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
             )
             profile_id = profile.id
 
+            deployment = repositories.create_model_deployment(
+                session, ModelDeploymentCreate(model_profile_id=profile_id)
+            )
+            deployment_id = deployment.id
+
         with session_factory() as session:
             saved_profile = repositories.get_model_profile(session, profile_id)
             assert saved_profile is not None
@@ -70,7 +81,7 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
             run = repositories.create_evaluation_run(
                 session,
                 EvaluationRunCreate(
-                    model_profile_id=profile_id,
+                    model_deployment_id=deployment_id,
                     workload_name="postgres-storage-test-workload",
                     request_count=12,
                     concurrency=3,
@@ -82,12 +93,15 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
             saved_run = repositories.get_evaluation_run(session, run_id)
             assert saved_run is not None
             assert saved_run.model_profile_id == profile_id
+            assert saved_run.model_deployment_id == deployment_id
             assert saved_run.request_count == 12
             assert saved_run.metrics is None
     finally:
         with session_factory() as session:
             if run_id is not None:
                 assert repositories.delete_evaluation_run(session, run_id)
+            if deployment_id is not None:
+                assert repositories.delete_model_deployment(session, deployment_id)
             if profile_id is not None:
                 assert repositories.delete_model_profile(session, profile_id)
 

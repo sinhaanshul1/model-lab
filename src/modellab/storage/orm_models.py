@@ -32,6 +32,37 @@ class ModelProfileRecord(Base):
     evaluation_runs: Mapped[list["EvaluationRunRecord"]] = relationship(
         back_populates="model_profile", cascade="all, delete-orphan"
     )
+    deployments: Mapped[list["ModelDeploymentRecord"]] = relationship(
+        back_populates="model_profile", cascade="all, delete-orphan"
+    )
+
+
+class ModelDeploymentRecord(Base):
+    __tablename__ = "model_deployments"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    model_profile_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("model_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    lifecycle_policy: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    runtime_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    endpoint_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    model_profile: Mapped[ModelProfileRecord] = relationship(back_populates="deployments")
+    evaluation_runs: Mapped[list["EvaluationRunRecord"]] = relationship(
+        back_populates="model_deployment"
+    )
 
 
 class EvaluationRunRecord(Base):
@@ -42,6 +73,14 @@ class EvaluationRunRecord(Base):
         Uuid(as_uuid=True),
         ForeignKey("model_profiles.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    # Nullable only so evaluation rows created before deployments were introduced
+    # remain readable. All new evaluation runs are linked to a deployment.
+    model_deployment_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("model_deployments.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     workload_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -59,3 +98,6 @@ class EvaluationRunRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     model_profile: Mapped[ModelProfileRecord] = relationship(back_populates="evaluation_runs")
+    model_deployment: Mapped[ModelDeploymentRecord | None] = relationship(
+        back_populates="evaluation_runs"
+    )

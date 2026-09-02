@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from modellab.api.models import (
     EvaluationRunCreate,
     EvaluationRunStatus,
+    ModelDeploymentCreate,
     ModelProfileCreate,
     ServingEngine,
 )
@@ -40,7 +41,7 @@ def schema() -> None:
     create_schema(_require_dedicated_test_database())
 
 
-def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID]:
+def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID, UUID]:
     session_factory = get_session_factory(_require_dedicated_test_database())
     with session_factory() as session:
         profile = repositories.create_model_profile(
@@ -51,23 +52,27 @@ def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID]:
                 engine=ServingEngine.MOCK,
             ),
         )
+        deployment = repositories.create_model_deployment(
+            session, ModelDeploymentCreate(model_profile_id=profile.id)
+        )
         run = repositories.create_evaluation_run(
             session,
             EvaluationRunCreate(
-                model_profile_id=profile.id,
+                model_deployment_id=deployment.id,
                 workload_name="smoke-test",
                 request_count=request_count,
                 concurrency=2,
             ),
         )
-    return profile.id, run.id
+    return profile.id, deployment.id, run.id
 
 
-def _cleanup(profile_id: UUID, run_ids: list[UUID]) -> None:
+def _cleanup(profile_id: UUID, deployment_id: UUID, run_ids: list[UUID]) -> None:
     session_factory = get_session_factory(_require_dedicated_test_database())
     with session_factory() as session:
         for run_id in run_ids:
             repositories.delete_evaluation_run(session, run_id)
+        repositories.delete_model_deployment(session, deployment_id)
         repositories.delete_model_profile(session, profile_id)
 
 
@@ -84,7 +89,7 @@ def _failure_response(request: httpx.Request) -> httpx.Response:
 
 
 def test_only_one_session_can_claim_each_queued_run() -> None:
-    profile_id, first_run_id = _create_profile_and_run()
+    profile_id, deployment_id, first_run_id = _create_profile_and_run()
     session_factory = get_session_factory(_require_dedicated_test_database())
     second_run_id = None
 
@@ -93,7 +98,7 @@ def test_only_one_session_can_claim_each_queued_run() -> None:
             second_run = repositories.create_evaluation_run(
                 session,
                 EvaluationRunCreate(
-                    model_profile_id=profile_id,
+                    model_deployment_id=deployment_id,
                     workload_name="smoke-test",
                     request_count=2,
                     concurrency=1,
@@ -111,11 +116,13 @@ def test_only_one_session_can_claim_each_queued_run() -> None:
         assert first_claim.id != second_claim.id
         assert {first_claim.id, second_claim.id} == {first_run_id, second_run_id}
     finally:
-        _cleanup(profile_id, [first_run_id, *([second_run_id] if second_run_id else [])])
+        _cleanup(
+            profile_id, deployment_id, [first_run_id, *([second_run_id] if second_run_id else [])]
+        )
 
 
 def test_worker_completes_a_queued_mock_evaluation() -> None:
-    profile_id, run_id = _create_profile_and_run(request_count=4)
+    profile_id, deployment_id, run_id = _create_profile_and_run(request_count=4)
     session_factory = get_session_factory(_require_dedicated_test_database())
     worker = BenchmarkWorker(
         session_factory,
@@ -136,11 +143,11 @@ def test_worker_completes_a_queued_mock_evaluation() -> None:
         assert completed_run.metrics.p95_ttft_ms is not None
         assert completed_run.metrics.output_tokens_per_second is not None
     finally:
-        _cleanup(profile_id, [run_id])
+        _cleanup(profile_id, deployment_id, [run_id])
 
 
 def test_worker_marks_a_run_failed_when_mock_requests_fail() -> None:
-    profile_id, run_id = _create_profile_and_run(request_count=1)
+    profile_id, deployment_id, run_id = _create_profile_and_run(request_count=1)
     session_factory = get_session_factory(_require_dedicated_test_database())
     worker = BenchmarkWorker(
         session_factory,
@@ -157,4 +164,4 @@ def test_worker_marks_a_run_failed_when_mock_requests_fail() -> None:
         assert failed_run.status is EvaluationRunStatus.FAILED
         assert failed_run.finished_at is not None
     finally:
-        _cleanup(profile_id, [run_id])
+        _cleanup(profile_id, deployment_id, [run_id])

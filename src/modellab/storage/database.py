@@ -6,7 +6,7 @@ import os
 from functools import lru_cache
 from typing import Generator
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from modellab.storage.orm_models import Base
@@ -40,7 +40,30 @@ def get_session() -> Generator[Session, None, None]:
 def create_schema(database_url: str | None = None) -> None:
     """Create the local development/test tables when they do not already exist."""
 
-    Base.metadata.create_all(get_engine(database_url))
+    engine = get_engine(database_url)
+    Base.metadata.create_all(engine)
+
+    # ``create_all`` does not add columns to tables created by earlier
+    # prototype versions. Keep the one additive compatibility upgrade here
+    # until ModelLab adopts a versioned migration tool.
+    evaluation_columns = {
+        column["name"] for column in inspect(engine).get_columns("evaluation_runs")
+    }
+    if "model_deployment_id" not in evaluation_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE evaluation_runs "
+                    "ADD COLUMN model_deployment_id UUID NULL "
+                    "REFERENCES model_deployments(id) ON DELETE SET NULL"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_evaluation_runs_model_deployment_id "
+                    "ON evaluation_runs (model_deployment_id)"
+                )
+            )
 
 
 def reset_database_configuration() -> None:
