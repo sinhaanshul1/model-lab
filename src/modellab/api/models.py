@@ -103,6 +103,11 @@ class ModelDeploymentCreate(BaseModel):
     lifecycle_policy: DeploymentLifecyclePolicy = DeploymentLifecyclePolicy.EPHEMERAL
 
 
+class ModelDeploymentRequest(BaseModel):
+    provider: Literal["mock"] = "mock"
+    lifecycle_policy: DeploymentLifecyclePolicy = DeploymentLifecyclePolicy.EPHEMERAL
+
+
 class ModelDeployment(BaseModel):
     id: UUID
     model_profile_id: UUID

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, HTTPException, status
@@ -12,6 +13,10 @@ from modellab.api.models import (
     ChatMessage,
     EvaluationRun,
     EvaluationRunCreate,
+    ModelDeployment,
+    ModelDeploymentCreate,
+    ModelDeploymentRequest,
+    ModelDeploymentStatus,
     MockChatCompletion,
     MockChatCompletionChoice,
     MockChatCompletionRequest,
@@ -20,7 +25,9 @@ from modellab.api.models import (
     ModelProfileCreate,
 )
 from modellab.storage import repositories
-from modellab.storage.database import get_session
+from modellab.storage.database import get_session, get_session_factory
+from modellab.deployments import DeploymentManager, MockDeploymentProvider
+from modellab.deployments.manager import DeploymentLifecycleError
 
 
 app = FastAPI(
@@ -28,6 +35,19 @@ app = FastAPI(
     version="0.1.0",
     description="Configuration and evaluation-run control plane for LLM serving.",
 )
+
+DEFAULT_MOCK_DEPLOYMENT_URL = "http://127.0.0.1:8000/v1/mock-model/chat/completions"
+
+
+def get_deployment_manager() -> DeploymentManager:
+    return DeploymentManager(
+        get_session_factory(),
+        {
+            "mock": MockDeploymentProvider(
+                os.getenv("MODELLAB_MOCK_MODEL_URL", DEFAULT_MOCK_DEPLOYMENT_URL)
+            )
+        },
+    )
 
 def deterministic_mock_completion(payload: MockChatCompletionRequest) -> MockChatCompletion:
     """Return a repeatable response for the same request payload.
@@ -145,6 +165,63 @@ def get_model_profile(
 
 
 @app.post(
+    "/v1/model-profiles/{profile_id}/deployments",
+    response_model=ModelDeployment,
+    status_code=status.HTTP_201_CREATED,
+    tags=["model deployments"],
+)
+async def create_model_deployment(
+    profile_id: UUID,
+    payload: ModelDeploymentRequest,
+    session: Session = Depends(get_session),
+    manager: DeploymentManager = Depends(get_deployment_manager),
+) -> ModelDeployment:
+    if repositories.get_model_profile(session, profile_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+    deployment = repositories.create_model_deployment(
+        session,
+        ModelDeploymentCreate(
+            model_profile_id=profile_id,
+            provider=payload.provider,
+            lifecycle_policy=payload.lifecycle_policy,
+        ),
+    )
+    return await manager.start(deployment.id)
+
+
+@app.get(
+    "/v1/model-deployments/{deployment_id}",
+    response_model=ModelDeployment,
+    tags=["model deployments"],
+)
+def get_model_deployment(
+    deployment_id: UUID, session: Session = Depends(get_session)
+) -> ModelDeployment:
+    deployment = repositories.get_model_deployment(session, deployment_id)
+    if deployment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model deployment not found")
+    return deployment
+
+
+@app.post(
+    "/v1/model-deployments/{deployment_id}/stop",
+    response_model=ModelDeployment,
+    tags=["model deployments"],
+)
+async def stop_model_deployment(
+    deployment_id: UUID,
+    session: Session = Depends(get_session),
+    manager: DeploymentManager = Depends(get_deployment_manager),
+) -> ModelDeployment:
+    if repositories.get_model_deployment(session, deployment_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model deployment not found")
+    try:
+        return await manager.stop(deployment_id)
+    except DeploymentLifecycleError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post(
     "/v1/evaluation-runs",
     response_model=EvaluationRun,
     status_code=status.HTTP_202_ACCEPTED,
@@ -156,7 +233,7 @@ def create_evaluation_run(
             "smoke_test": {
                 "summary": "Small evaluation run",
                 "value": {
-                    "model_profile_id": "00000000-0000-0000-0000-000000000001",
+                    "model_deployment_id": "00000000-0000-0000-0000-000000000001",
                     "workload_name": "smoke-test",
                     "request_count": 10,
                     "concurrency": 2,
@@ -166,8 +243,11 @@ def create_evaluation_run(
     ),
     session: Session = Depends(get_session),
 ) -> EvaluationRun:
-    if repositories.get_model_profile(session, payload.model_profile_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model profile not found")
+    deployment = repositories.get_model_deployment(session, payload.model_deployment_id)
+    if deployment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model deployment not found")
+    if deployment.status is not ModelDeploymentStatus.READY:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Model deployment is not ready")
     return repositories.create_evaluation_run(session, payload)
 
 

@@ -142,6 +142,79 @@ def get_model_deployment(session: Session, deployment_id: UUID) -> ModelDeployme
     return to_model_deployment(record) if record is not None else None
 
 
+def mark_model_deployment_starting(
+    session: Session, deployment_id: UUID
+) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None or record.status != ModelDeploymentStatus.PENDING.value:
+        return None
+    record.status = ModelDeploymentStatus.STARTING.value
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
+def mark_model_deployment_ready(
+    session: Session, deployment_id: UUID, *, runtime_id: str, endpoint_url: str
+) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None or record.status != ModelDeploymentStatus.STARTING.value:
+        return None
+    record.status = ModelDeploymentStatus.READY.value
+    record.runtime_id = runtime_id
+    record.endpoint_url = endpoint_url
+    record.ready_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
+def mark_model_deployment_stopping(
+    session: Session, deployment_id: UUID
+) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None or record.status != ModelDeploymentStatus.READY.value:
+        return None
+    record.status = ModelDeploymentStatus.STOPPING.value
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
+def mark_model_deployment_stopped(
+    session: Session, deployment_id: UUID
+) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None or record.status != ModelDeploymentStatus.STOPPING.value:
+        return None
+    record.status = ModelDeploymentStatus.STOPPED.value
+    record.runtime_id = None
+    record.endpoint_url = None
+    record.stopped_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
+def mark_model_deployment_failed(
+    session: Session, deployment_id: UUID, failure_reason: str
+) -> ModelDeployment | None:
+    record = session.get(ModelDeploymentRecord, deployment_id)
+    if record is None or record.status in {
+        ModelDeploymentStatus.STOPPED.value,
+        ModelDeploymentStatus.FAILED.value,
+    }:
+        return None
+    record.status = ModelDeploymentStatus.FAILED.value
+    record.failure_reason = failure_reason[:2000]
+    record.runtime_id = None
+    record.endpoint_url = None
+    record.stopped_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(record)
+    return to_model_deployment(record)
+
+
 def list_model_deployments(session: Session) -> list[ModelDeployment]:
     records = session.scalars(
         select(ModelDeploymentRecord).order_by(
