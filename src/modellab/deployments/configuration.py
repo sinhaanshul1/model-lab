@@ -35,6 +35,9 @@ def build_deployment_providers() -> dict[str, DeploymentProvider]:
         docker.from_env(),
         image=image,
         network=os.getenv("MODELLAB_DOCKER_NETWORK", "modellab-runtime"),
+        model_cache_volume=os.getenv(
+            "MODELLAB_MODEL_CACHE_VOLUME", "modellab-model-cache"
+        ),
         gpu_device_request=docker.types.DeviceRequest(
             count=-1, capabilities=[["gpu"]]
         ),

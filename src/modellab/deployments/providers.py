@@ -57,6 +57,7 @@ class DockerDeploymentProvider:
         image: str,
         network: str,
         gpu_device_request: Any,
+        model_cache_volume: str,
         health_timeout_seconds: float = 300.0,
         health_interval_seconds: float = 2.0,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -67,6 +68,7 @@ class DockerDeploymentProvider:
         self._image = image
         self._network = network
         self._gpu_device_request = gpu_device_request
+        self._model_cache_volume = model_cache_volume
         self._health_timeout_seconds = health_timeout_seconds
         self._health_interval_seconds = health_interval_seconds
         self._transport = transport
@@ -87,6 +89,12 @@ class DockerDeploymentProvider:
             network=self._network,
             ipc_mode="host",
             device_requests=[self._gpu_device_request],
+            volumes={
+                self._model_cache_volume: {
+                    "bind": "/root/.cache/huggingface",
+                    "mode": "rw",
+                }
+            },
             labels={
                 "modellab.managed": "true",
                 "modellab.deployment_id": str(deployment.id),

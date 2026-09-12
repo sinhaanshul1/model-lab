@@ -6,6 +6,7 @@ services:
       MODELLAB_DOCKER_PROVIDER_ENABLED: "true"
       MODELLAB_DOCKER_NETWORK: modellab-runtime
       MODELLAB_VLLM_IMAGE: ${MODELLAB_VLLM_IMAGE:?Set a pinned vLLM image tag}
+      MODELLAB_MODEL_CACHE_VOLUME: modellab-model-cache
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
@@ -14,5 +15,10 @@ services:
       MODELLAB_DOCKER_PROVIDER_ENABLED: "true"
       MODELLAB_DOCKER_NETWORK: modellab-runtime
       MODELLAB_VLLM_IMAGE: ${MODELLAB_VLLM_IMAGE:?Set a pinned vLLM image tag}
+      MODELLAB_MODEL_CACHE_VOLUME: modellab-model-cache
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  model_cache:
+    name: modellab-model-cache

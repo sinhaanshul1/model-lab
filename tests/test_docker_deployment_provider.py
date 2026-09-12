@@ -95,6 +95,7 @@ def test_docker_provider_starts_checks_and_removes_vllm_container() -> None:
         image="vllm/vllm-openai:v0.21.0",
         network="modellab-runtime",
         gpu_device_request=gpu_request,
+        model_cache_volume="modellab-model-cache",
         health_timeout_seconds=0,
         transport=httpx.MockTransport(_healthy_response),
     )
@@ -109,6 +110,12 @@ def test_docker_provider_starts_checks_and_removes_vllm_container() -> None:
     assert client.containers.run_kwargs is not None
     assert client.containers.run_kwargs["network"] == "modellab-runtime"
     assert client.containers.run_kwargs["device_requests"] == [gpu_request]
+    assert client.containers.run_kwargs["volumes"] == {
+        "modellab-model-cache": {
+            "bind": "/root/.cache/huggingface",
+            "mode": "rw",
+        }
+    }
     assert client.containers.run_kwargs["command"] == [
         "--model",
         "org/model-awq",
@@ -137,4 +144,5 @@ def test_docker_provider_rejects_unpinned_images() -> None:
             image="vllm/vllm-openai:latest",
             network="modellab-runtime",
             gpu_device_request=object(),
+            model_cache_volume="modellab-model-cache",
         )
