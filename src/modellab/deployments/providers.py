@@ -132,7 +132,6 @@ class DockerDeploymentProvider:
     @staticmethod
     def _build_command(profile: ModelProfile) -> list[str]:
         command = [
-            "--model",
             profile.model,
             "--served-model-name",
             profile.model,
@@ -143,6 +142,9 @@ class DockerDeploymentProvider:
         ]
         if profile.quantization and profile.quantization.lower() != "none":
             command.extend(["--quantization", profile.quantization])
-        if profile.prefix_caching:
-            command.append("--enable-prefix-caching")
+        command.append(
+            "--enable-prefix-caching"
+            if profile.prefix_caching
+            else "--no-enable-prefix-caching"
+        )
         return command

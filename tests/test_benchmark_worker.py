@@ -114,6 +114,25 @@ def _failure_response(request: httpx.Request) -> httpx.Response:
     return httpx.Response(503, json={"detail": "mock outage"}, request=request)
 
 
+class DelayedSSEStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b'data: {"choices":[{"delta":{"role":"assistant"}}],"usage":null}\n\n'
+        await asyncio.sleep(0.01)
+        yield b'data: {"choices":[{"delta":{"content":"first token"}}],"usage":null}\n\n'
+        await asyncio.sleep(0.01)
+        yield b'data: {"choices":[],"usage":{"completion_tokens":4}}\n\n'
+        yield b"data: [DONE]\n\n"
+
+
+def _delayed_stream_response(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        stream=DelayedSSEStream(),
+        headers={"content-type": "text/event-stream"},
+        request=request,
+    )
+
+
 def test_only_one_session_can_claim_each_queued_run() -> None:
     profile_id, deployment_id, first_run_id = _create_profile_and_run()
     session_factory = get_session_factory(_require_dedicated_test_database())
@@ -217,5 +236,29 @@ def test_worker_marks_a_run_failed_when_mock_requests_fail() -> None:
             deployment = repositories.get_model_deployment(session, deployment_id)
         assert deployment is not None
         assert deployment.status is ModelDeploymentStatus.STOPPED
+    finally:
+        _cleanup(profile_id, deployment_id, [run_id])
+
+
+def test_worker_measures_first_token_before_stream_completion() -> None:
+    profile_id, deployment_id, run_id = _create_profile_and_run(request_count=1)
+    session_factory = get_session_factory(_require_dedicated_test_database())
+    worker = BenchmarkWorker(
+        session_factory,
+        _deployment_manager(),
+        transport=httpx.MockTransport(_delayed_stream_response),
+    )
+
+    try:
+        assert asyncio.run(worker.process_next_run())
+
+        with session_factory() as session:
+            completed_run = repositories.get_evaluation_run(session, run_id)
+        assert completed_run is not None
+        assert completed_run.metrics is not None
+        request_metric = completed_run.metrics.request_metrics[0]
+        assert request_metric.ttft_ms >= 5
+        assert request_metric.end_to_end_latency_ms > request_metric.ttft_ms
+        assert request_metric.completion_tokens == 4
     finally:
         _cleanup(profile_id, deployment_id, [run_id])

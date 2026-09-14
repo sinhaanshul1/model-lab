@@ -55,14 +55,14 @@ class FakeDockerClient:
         self.containers = FakeContainers()
 
 
-def _profile() -> ModelProfile:
+def _profile(*, prefix_caching: bool = True) -> ModelProfile:
     return ModelProfile(
         id=uuid4(),
         name="docker-provider-profile",
         model="org/model-awq",
         engine=ServingEngine.VLLM,
         quantization="awq",
-        prefix_caching=True,
+        prefix_caching=prefix_caching,
         max_concurrent_sequences=16,
         max_context_tokens=8192,
         created_at=datetime.now(timezone.utc),
@@ -117,7 +117,6 @@ def test_docker_provider_starts_checks_and_removes_vllm_container() -> None:
         }
     }
     assert client.containers.run_kwargs["command"] == [
-        "--model",
         "org/model-awq",
         "--served-model-name",
         "org/model-awq",
@@ -135,6 +134,27 @@ def test_docker_provider_starts_checks_and_removes_vllm_container() -> None:
     assert client.containers.requested_container_id == "container-123"
     assert client.containers.container.stop_calls == [30]
     assert client.containers.container.remove_calls == 1
+
+
+def test_docker_provider_explicitly_disables_prefix_caching() -> None:
+    client = FakeDockerClient()
+    profile = _profile(prefix_caching=False)
+    provider = DockerDeploymentProvider(
+        client,
+        image="vllm/vllm-openai:v0.21.0",
+        network="modellab-runtime",
+        gpu_device_request=object(),
+        model_cache_volume="modellab-model-cache",
+        health_timeout_seconds=0,
+        transport=httpx.MockTransport(_healthy_response),
+    )
+
+    asyncio.run(provider.start(profile, _deployment(profile)))
+
+    assert client.containers.run_kwargs is not None
+    command = client.containers.run_kwargs["command"]
+    assert "--no-enable-prefix-caching" in command
+    assert "--enable-prefix-caching" not in command
 
 
 def test_docker_provider_rejects_unpinned_images() -> None:
