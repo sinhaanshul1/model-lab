@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Uuid, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -88,9 +88,15 @@ class EvaluationRunRecord(Base):
     concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     successful_requests: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    p50_ttft_ms: Mapped[float | None] = mapped_column(nullable=True)
     p95_ttft_ms: Mapped[float | None] = mapped_column(nullable=True)
+    p99_ttft_ms: Mapped[float | None] = mapped_column(nullable=True)
+    p50_end_to_end_latency_ms: Mapped[float | None] = mapped_column(nullable=True)
+    p95_end_to_end_latency_ms: Mapped[float | None] = mapped_column(nullable=True)
+    p99_end_to_end_latency_ms: Mapped[float | None] = mapped_column(nullable=True)
     output_tokens_per_second: Mapped[float | None] = mapped_column(nullable=True)
     quality_score: Mapped[float | None] = mapped_column(nullable=True)
+    request_metrics: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

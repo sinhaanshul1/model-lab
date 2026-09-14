@@ -7,6 +7,7 @@ import json
 from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from modellab.api.models import (
     ChatMessage,
@@ -104,10 +105,51 @@ def mock_chat_completions(
             }
         }
     ),
-) -> MockChatCompletion:
+) -> MockChatCompletion | StreamingResponse:
     """Generate a deterministic mock response without loading a real model."""
 
-    return deterministic_mock_completion(payload)
+    completion = deterministic_mock_completion(payload)
+    if not payload.stream:
+        return completion
+
+    content = completion.choices[0].message.content
+    midpoint = max(1, len(content) // 2)
+    chunks = (content[:midpoint], content[midpoint:])
+    events: list[dict[str, object]] = [
+        {
+            "id": completion.id,
+            "object": "chat.completion.chunk",
+            "created": completion.created,
+            "model": completion.model,
+            "choices": [{"index": 0, "delta": {"role": "assistant"}}],
+            "usage": None,
+        }
+    ]
+    events.extend(
+        {
+            "id": completion.id,
+            "object": "chat.completion.chunk",
+            "created": completion.created,
+            "model": completion.model,
+            "choices": [{"index": 0, "delta": {"content": chunk}}],
+            "usage": None,
+        }
+        for chunk in chunks
+        if chunk
+    )
+    events.append(
+        {
+            "id": completion.id,
+            "object": "chat.completion.chunk",
+            "created": completion.created,
+            "model": completion.model,
+            "choices": [],
+            "usage": completion.usage.model_dump(),
+        }
+    )
+    body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+    body += "data: [DONE]\n\n"
+    return StreamingResponse(iter((body,)), media_type="text/event-stream")
 
 
 @app.post(

@@ -56,6 +56,8 @@ class MockChatCompletionRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     temperature: float = Field(default=0.0, ge=0, le=2)
     max_tokens: int = Field(default=256, ge=1, le=4_096)
+    stream: bool = False
+    stream_options: dict[str, bool] | None = None
 
 
 class MockChatCompletionChoice(BaseModel):
@@ -131,12 +133,26 @@ class EvaluationRunCreate(BaseModel):
     concurrency: int = Field(default=1, ge=1, le=10_000)
 
 
+class EvaluationRequestMetrics(BaseModel):
+    request_index: int = Field(ge=0)
+    ttft_ms: float = Field(ge=0)
+    end_to_end_latency_ms: float = Field(ge=0)
+    completion_tokens: int = Field(ge=1)
+    output_tokens_per_second: float = Field(ge=0)
+
+
 class EvaluationMetrics(BaseModel):
     request_count: int
     successful_requests: int = 0
+    p50_ttft_ms: float | None = None
     p95_ttft_ms: float | None = None
+    p99_ttft_ms: float | None = None
+    p50_end_to_end_latency_ms: float | None = None
+    p95_end_to_end_latency_ms: float | None = None
+    p99_end_to_end_latency_ms: float | None = None
     output_tokens_per_second: float | None = None
     quality_score: float | None = Field(default=None, ge=0, le=1)
+    request_metrics: list[EvaluationRequestMetrics] = Field(default_factory=list)
 
 
 class EvaluationRun(BaseModel):

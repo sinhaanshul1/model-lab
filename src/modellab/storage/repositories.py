@@ -46,18 +46,30 @@ def to_evaluation_run(record: EvaluationRunRecord) -> EvaluationRun:
     has_metrics = any(
         value is not None
         for value in (
+            record.p50_ttft_ms,
             record.p95_ttft_ms,
+            record.p99_ttft_ms,
+            record.p50_end_to_end_latency_ms,
+            record.p95_end_to_end_latency_ms,
+            record.p99_end_to_end_latency_ms,
             record.output_tokens_per_second,
             record.quality_score,
+            record.request_metrics,
         )
     ) or record.successful_requests > 0
     metrics = (
         EvaluationMetrics(
             request_count=record.request_count,
             successful_requests=record.successful_requests,
+            p50_ttft_ms=record.p50_ttft_ms,
             p95_ttft_ms=record.p95_ttft_ms,
+            p99_ttft_ms=record.p99_ttft_ms,
+            p50_end_to_end_latency_ms=record.p50_end_to_end_latency_ms,
+            p95_end_to_end_latency_ms=record.p95_end_to_end_latency_ms,
+            p99_end_to_end_latency_ms=record.p99_end_to_end_latency_ms,
             output_tokens_per_second=record.output_tokens_per_second,
             quality_score=record.quality_score,
+            request_metrics=record.request_metrics or [],
         )
         if has_metrics
         else None
@@ -286,9 +298,15 @@ def complete_evaluation_run(
 
     record.status = EvaluationRunStatus.SUCCEEDED.value
     record.successful_requests = metrics.successful_requests
+    record.p50_ttft_ms = metrics.p50_ttft_ms
     record.p95_ttft_ms = metrics.p95_ttft_ms
+    record.p99_ttft_ms = metrics.p99_ttft_ms
+    record.p50_end_to_end_latency_ms = metrics.p50_end_to_end_latency_ms
+    record.p95_end_to_end_latency_ms = metrics.p95_end_to_end_latency_ms
+    record.p99_end_to_end_latency_ms = metrics.p99_end_to_end_latency_ms
     record.output_tokens_per_second = metrics.output_tokens_per_second
     record.quality_score = metrics.quality_score
+    record.request_metrics = [metric.model_dump() for metric in metrics.request_metrics]
     record.finished_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(record)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from uuid import UUID
 
@@ -38,9 +39,16 @@ def schema() -> None:
 
 
 def _success_response(request: httpx.Request) -> httpx.Response:
+    events = [
+        {"choices": [{"index": 0, "delta": {"content": "hello"}}], "usage": None},
+        {"choices": [], "usage": {"completion_tokens": 5}},
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+    content += "data: [DONE]\n\n"
     return httpx.Response(
         200,
-        json={"usage": {"completion_tokens": 5}},
+        text=content,
+        headers={"content-type": "text/event-stream"},
         request=request,
     )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from modellab.api.models import (
     DeploymentLifecyclePolicy,
     EvaluationMetrics,
+    EvaluationRequestMetrics,
     EvaluationRun,
     ModelDeploymentStatus,
     ModelProfile,
@@ -141,15 +143,20 @@ class BenchmarkWorker:
             ) from failures[0]
 
         request_results = [response for response in responses if not isinstance(response, Exception)]
-        latencies_ms = [result[0] for result in request_results]
-        output_tokens = sum(result[1] for result in request_results)
+        ttft_samples = [result.ttft_ms for result in request_results]
+        end_to_end_samples = [result.end_to_end_latency_ms for result in request_results]
+        output_tokens = sum(result.completion_tokens for result in request_results)
         return EvaluationMetrics(
             request_count=run.request_count,
             successful_requests=len(request_results),
-            # The non-streaming mock returns all tokens at once, so this is a
-            # documented end-to-end response-latency proxy, not true TTFT.
-            p95_ttft_ms=_p95(latencies_ms),
+            p50_ttft_ms=_percentile(ttft_samples, 50),
+            p95_ttft_ms=_percentile(ttft_samples, 95),
+            p99_ttft_ms=_percentile(ttft_samples, 99),
+            p50_end_to_end_latency_ms=_percentile(end_to_end_samples, 50),
+            p95_end_to_end_latency_ms=_percentile(end_to_end_samples, 95),
+            p99_end_to_end_latency_ms=_percentile(end_to_end_samples, 99),
             output_tokens_per_second=output_tokens / elapsed_seconds if elapsed_seconds else 0.0,
+            request_metrics=request_results,
         )
 
     async def _send_request(
@@ -159,7 +166,7 @@ class BenchmarkWorker:
         profile: ModelProfile,
         endpoint_url: str,
         request_index: int,
-    ) -> tuple[float, int]:
+    ) -> EvaluationRequestMetrics:
         prompt = SMOKE_TEST_PROMPTS[request_index % len(SMOKE_TEST_PROMPTS)]
         payload = {
             "model": profile.model,
@@ -169,23 +176,87 @@ class BenchmarkWorker:
             ],
             "temperature": 0.0,
             "max_tokens": 128,
+            "stream": True,
+            "stream_options": {"include_usage": True},
         }
         async with semaphore:
             request_started_at = time.perf_counter()
-            response = await client.post(endpoint_url, json=payload)
-            elapsed_ms = (time.perf_counter() - request_started_at) * 1_000
-        response.raise_for_status()
-        completion_tokens = int(response.json()["usage"]["completion_tokens"])
-        return elapsed_ms, completion_tokens
+            first_token_at: float | None = None
+            completion_tokens: int | None = None
+            saw_done = False
+            async with client.stream("POST", endpoint_url, json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or line.startswith(":"):
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    data = line.removeprefix("data:").strip()
+                    if data == "[DONE]":
+                        saw_done = True
+                        break
+                    event = json.loads(data)
+                    usage = event.get("usage")
+                    if usage and usage.get("completion_tokens") is not None:
+                        completion_tokens = int(usage["completion_tokens"])
+                    if first_token_at is None and _event_contains_output(event):
+                        first_token_at = time.perf_counter()
+            request_finished_at = time.perf_counter()
+
+        if first_token_at is None:
+            raise BenchmarkExecutionError(
+                f"Streaming request {request_index} returned no generated content."
+            )
+        if not saw_done:
+            raise BenchmarkExecutionError(
+                f"Streaming request {request_index} ended without a [DONE] event."
+            )
+        if completion_tokens is None or completion_tokens < 1:
+            raise BenchmarkExecutionError(
+                f"Streaming request {request_index} returned no completion-token usage."
+            )
+
+        ttft_ms = (first_token_at - request_started_at) * 1_000
+        end_to_end_latency_ms = (request_finished_at - request_started_at) * 1_000
+        return EvaluationRequestMetrics(
+            request_index=request_index,
+            ttft_ms=ttft_ms,
+            end_to_end_latency_ms=end_to_end_latency_ms,
+            completion_tokens=completion_tokens,
+            output_tokens_per_second=(
+                completion_tokens / (end_to_end_latency_ms / 1_000)
+                if end_to_end_latency_ms
+                else 0.0
+            ),
+        )
 
 
-def _p95(samples: Sequence[float]) -> float:
-    """Return nearest-rank P95 for a non-empty collection of latency samples."""
+def _event_contains_output(event: object) -> bool:
+    if not isinstance(event, dict):
+        return False
+    choices = event.get("choices")
+    if not isinstance(choices, list):
+        return False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        if any(delta.get(field) for field in ("content", "reasoning_content")):
+            return True
+    return False
+
+
+def _percentile(samples: Sequence[float], percentile: int) -> float:
+    """Return a nearest-rank percentile for a non-empty collection."""
 
     if not samples:
-        raise ValueError("P95 requires at least one latency sample.")
+        raise ValueError("A percentile requires at least one sample.")
+    if not 1 <= percentile <= 100:
+        raise ValueError("Percentile must be between 1 and 100.")
     ordered_samples = sorted(samples)
-    return ordered_samples[math.ceil(len(ordered_samples) * 0.95) - 1]
+    return ordered_samples[math.ceil(len(ordered_samples) * percentile / 100) - 1]
 
 
 def main() -> None:

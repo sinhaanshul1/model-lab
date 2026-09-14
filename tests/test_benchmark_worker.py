@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from uuid import UUID
 
@@ -87,9 +88,24 @@ def _cleanup(profile_id: UUID, deployment_id: UUID, run_ids: list[UUID]) -> None
 
 
 def _success_response(request: httpx.Request) -> httpx.Response:
+    payload = json.loads(request.content)
+    assert payload["stream"] is True
+    assert payload["stream_options"] == {"include_usage": True}
+    events = [
+        {
+            "choices": [
+                {"index": 0, "delta": {"role": "assistant", "content": "hello"}}
+            ],
+            "usage": None,
+        },
+        {"choices": [], "usage": {"completion_tokens": 7}},
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+    content += "data: [DONE]\n\n"
     return httpx.Response(
         200,
-        json={"usage": {"completion_tokens": 7}},
+        text=content,
+        headers={"content-type": "text/event-stream"},
         request=request,
     )
 
@@ -150,8 +166,28 @@ def test_worker_completes_a_queued_mock_evaluation() -> None:
         assert completed_run.metrics is not None
         assert completed_run.metrics.request_count == 4
         assert completed_run.metrics.successful_requests == 4
+        assert completed_run.metrics.p50_ttft_ms is not None
         assert completed_run.metrics.p95_ttft_ms is not None
+        assert completed_run.metrics.p99_ttft_ms is not None
+        assert completed_run.metrics.p50_end_to_end_latency_ms is not None
+        assert completed_run.metrics.p95_end_to_end_latency_ms is not None
+        assert completed_run.metrics.p99_end_to_end_latency_ms is not None
         assert completed_run.metrics.output_tokens_per_second is not None
+        assert len(completed_run.metrics.request_metrics) == 4
+        assert {metric.request_index for metric in completed_run.metrics.request_metrics} == {
+            0,
+            1,
+            2,
+            3,
+        }
+        assert all(
+            metric.ttft_ms <= metric.end_to_end_latency_ms
+            for metric in completed_run.metrics.request_metrics
+        )
+        assert all(
+            metric.completion_tokens == 7
+            for metric in completed_run.metrics.request_metrics
+        )
         with session_factory() as session:
             deployment = repositories.get_model_deployment(session, deployment_id)
         assert deployment is not None

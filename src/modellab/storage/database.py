@@ -65,6 +65,26 @@ def create_schema(database_url: str | None = None) -> None:
                 )
             )
 
+    metric_columns = {
+        "p50_ttft_ms": "DOUBLE PRECISION NULL",
+        "p99_ttft_ms": "DOUBLE PRECISION NULL",
+        "p50_end_to_end_latency_ms": "DOUBLE PRECISION NULL",
+        "p95_end_to_end_latency_ms": "DOUBLE PRECISION NULL",
+        "p99_end_to_end_latency_ms": "DOUBLE PRECISION NULL",
+        "request_metrics": "JSON NULL",
+    }
+    missing_metric_columns = {
+        name: definition
+        for name, definition in metric_columns.items()
+        if name not in evaluation_columns
+    }
+    if missing_metric_columns:
+        with engine.begin() as connection:
+            for name, definition in missing_metric_columns.items():
+                connection.execute(
+                    text(f"ALTER TABLE evaluation_runs ADD COLUMN {name} {definition}")
+                )
+
 
 def reset_database_configuration() -> None:
     """Clear cached connections after changing database URLs in tests."""
