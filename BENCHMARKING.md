@@ -1,52 +1,85 @@
-# Benchmark measurement notes
+# Benchmarking with ModelLab
 
-ModelLab's benchmark worker sends OpenAI-compatible streaming chat-completion
-requests to a ready deployment. It records timing with a monotonic clock so wall
-clock adjustments cannot distort a run.
+ModelLab runs versioned, reproducible workloads against an OpenAI-compatible
+deployment. The worker streams every response so it measures user-visible
+latency rather than merely timing a completed HTTP request.
 
-## Request behavior
+## Workloads
 
-Each request currently uses one of three deterministic smoke-test prompts,
-`temperature: 0`, `max_tokens: 128`, and these streaming options:
+Built-in JSON definitions live in `src/modellab/workloads/data`:
 
-```json
-{
-  "stream": true,
-  "stream_options": {"include_usage": true}
-}
+- `smoke-test`: quick end-to-end validation
+- `short-chat`: varied everyday instructions
+- `shared-prefix`: repeated context for prefix-cache comparisons
+- `long-context`: prompt-processing stress
+- `quality`: deterministic exact, numeric, containment, and JSON checks
+
+`GET /v1/workloads` lists them. `GET /v1/workloads/{name}/{version}` returns the
+full immutable definition. Each evaluation stores the workload version, SHA-256
+content hash, and generation settings, proving later comparisons used identical
+prompts.
+
+## Run an evaluation
+
+```bash
+curl -sS http://127.0.0.1:8000/v1/evaluation-runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model_deployment_id": "YOUR_DEPLOYMENT_ID",
+    "workload_name": "short-chat",
+    "workload_version": "1.0.0",
+    "warmup_request_count": 5,
+    "request_count": 100,
+    "concurrency": 4
+  }'
 ```
 
-The configured evaluation concurrency bounds the number of simultaneous HTTP
-streams. The smoke workload validates the measurement path; it is not yet a
-representative production dataset or a quality evaluation.
+Warm-up requests use the same workload but complete before the measurement clock
+starts. Their results are intentionally excluded.
 
 ## Metrics
 
-- **TTFT** is measured from immediately before sending a request until the first
-  nonempty generated `content` or `reasoning_content` delta arrives.
-- **End-to-end latency** is measured from immediately before sending a request
-  until its `[DONE]` event arrives.
-- **Aggregate output tokens per second** is the sum of completion tokens reported
-  by all final usage events divided by the wall-clock duration of the evaluation.
-- **Per-request output tokens per second** is that request's completion tokens
-  divided by its end-to-end latency.
-- P50, P95, and P99 use the nearest-rank method across successful requests.
+- **TTFT**: request start to first nonempty generated content or reasoning delta.
+- **End-to-end latency**: request start to the final `[DONE]` event.
+- **Output throughput**: successful completion tokens divided by measured wall time.
+- **Request throughput**: successful requests divided by measured wall time.
+- **Error rate**: failed measured requests divided by scheduled measured requests.
+- **Quality score**: mean deterministic case score; unscored cases are excluded.
 
-ModelLab persists every request's index, TTFT, end-to-end latency, completion-token
-count, and output rate, plus aggregate latency percentiles and throughput.
+P50, P95, and P99 use nearest rank. Every measured request retains its case ID,
+success/error, token counts, generated text, timings, output rate, and quality
+score. A run succeeds when at least one measured request succeeds; individual
+failures remain visible. It fails if warm-up cannot complete or every measured
+request fails. Ephemeral deployments are cleaned up after either outcome.
 
-## Failure rules
+## Compare two runs
 
-The run fails if any scheduled request returns an HTTP error, invalid JSON, no
-generated content, no final `[DONE]` marker, or no positive completion-token usage.
-An ephemeral deployment is cleaned up after either success or failure.
+Run the same workload, request count, concurrency, and warm-up count against two
+model profiles, then call:
 
-## Current limitations
+```bash
+curl -sS http://127.0.0.1:8000/v1/evaluation-comparisons \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "baseline_run_id": "BASELINE_RUN_ID",
+    "candidate_run_id": "CANDIDATE_RUN_ID"
+  }'
+```
 
-- Prompt and output token counts depend on the server's final usage event.
-- Chunk arrival intervals are not labeled as inter-token latency because one SSE
-  chunk is not guaranteed to contain exactly one token.
-- GPU utilization, KV-cache utilization, quality scoring, request-rate pacing,
-  warm-up exclusion, and representative versioned datasets are not implemented.
-- Small sample percentiles are mathematically valid but not statistically useful;
-  serious comparisons require larger repeated runs under controlled conditions.
+The API rejects mismatched experiments and returns absolute and percentage
+changes for available latency, throughput, reliability, and quality metrics.
+A negative latency percentage is faster; positive throughput or quality is better.
+
+## Recommended experiment matrix
+
+Change one profile setting at a time and repeat each run at least three times:
+
+1. Prefix caching off vs. on with `shared-prefix`.
+2. Concurrency 1, 2, 4, and 8 with `short-chat`.
+3. Default precision vs. supported quantization using identical workloads.
+4. Short vs. long context using the same deployment.
+5. Every performance candidate against `quality` to catch regressions.
+
+Chunk intervals are not labeled inter-token latency because an SSE chunk can
+contain more than one token. GPU and KV-cache utilization still require separate
+runtime telemetry and are not inferred from response timing.

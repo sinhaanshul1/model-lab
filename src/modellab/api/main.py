@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from modellab.api.models import (
     ChatMessage,
+    EvaluationComparison,
+    EvaluationComparisonRequest,
     EvaluationRun,
     EvaluationRunCreate,
     ModelDeployment,
@@ -24,6 +26,7 @@ from modellab.api.models import (
     ModelProfile,
     ModelProfileCreate,
 )
+from modellab.analysis import compare_evaluation_runs
 from modellab.storage import repositories
 from modellab.storage.database import get_session, get_session_factory
 from modellab.deployments import DeploymentManager, build_deployment_providers
@@ -324,3 +327,22 @@ def get_evaluation_run(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation run not found")
     return run
+
+
+@app.post(
+    "/v1/evaluation-comparisons",
+    response_model=EvaluationComparison,
+    tags=["evaluation runs"],
+)
+def compare_evaluations(
+    payload: EvaluationComparisonRequest,
+    session: Session = Depends(get_session),
+) -> EvaluationComparison:
+    baseline = repositories.get_evaluation_run(session, payload.baseline_run_id)
+    candidate = repositories.get_evaluation_run(session, payload.candidate_run_id)
+    if baseline is None or candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation run not found")
+    try:
+        return compare_evaluation_runs(baseline, candidate)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

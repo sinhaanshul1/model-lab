@@ -187,3 +187,26 @@ class EvaluationRun(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     metrics: EvaluationMetrics | None = None
+
+
+class EvaluationComparisonRequest(BaseModel):
+    baseline_run_id: UUID
+    candidate_run_id: UUID
+
+
+class MetricComparison(BaseModel):
+    baseline: float
+    candidate: float
+    absolute_change: float
+    percent_change: float | None
+
+
+class EvaluationComparison(BaseModel):
+    baseline_run_id: UUID
+    candidate_run_id: UUID
+    workload_name: str
+    workload_version: str | None
+    workload_hash: str
+    request_count: int
+    concurrency: int
+    metrics: dict[str, MetricComparison]
