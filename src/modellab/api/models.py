@@ -137,15 +137,29 @@ class EvaluationRunCreate(BaseModel):
 
 class EvaluationRequestMetrics(BaseModel):
     request_index: int = Field(ge=0)
-    ttft_ms: float = Field(ge=0)
-    end_to_end_latency_ms: float = Field(ge=0)
-    completion_tokens: int = Field(ge=1)
-    output_tokens_per_second: float = Field(ge=0)
+    case_id: str
+    success: bool
+    error: str | None = None
+    ttft_ms: float | None = Field(default=None, ge=0)
+    end_to_end_latency_ms: float | None = Field(default=None, ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=1)
+    output_tokens_per_second: float | None = Field(default=None, ge=0)
+    generated_text: str | None = None
+    quality_score: float | None = Field(default=None, ge=0, le=1)
 
 
 class EvaluationMetrics(BaseModel):
     request_count: int
     successful_requests: int = 0
+    failed_requests: int = 0
+    error_rate: float = Field(default=0, ge=0, le=1)
+    benchmark_duration_seconds: float | None = Field(default=None, ge=0)
+    request_throughput_per_second: float | None = Field(default=None, ge=0)
+    total_input_tokens: int = Field(default=0, ge=0)
+    total_output_tokens: int = Field(default=0, ge=0)
+    scored_requests: int = Field(default=0, ge=0)
+    passed_requests: int = Field(default=0, ge=0)
     p50_ttft_ms: float | None = None
     p95_ttft_ms: float | None = None
     p99_ttft_ms: float | None = None

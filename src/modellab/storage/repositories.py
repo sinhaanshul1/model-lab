@@ -62,6 +62,14 @@ def to_evaluation_run(record: EvaluationRunRecord) -> EvaluationRun:
         EvaluationMetrics(
             request_count=record.request_count,
             successful_requests=record.successful_requests,
+            failed_requests=record.failed_requests,
+            error_rate=record.error_rate or 0,
+            benchmark_duration_seconds=record.benchmark_duration_seconds,
+            request_throughput_per_second=record.request_throughput_per_second,
+            total_input_tokens=record.total_input_tokens,
+            total_output_tokens=record.total_output_tokens,
+            scored_requests=record.scored_requests,
+            passed_requests=record.passed_requests,
             p50_ttft_ms=record.p50_ttft_ms,
             p95_ttft_ms=record.p95_ttft_ms,
             p99_ttft_ms=record.p99_ttft_ms,
@@ -313,6 +321,14 @@ def complete_evaluation_run(
 
     record.status = EvaluationRunStatus.SUCCEEDED.value
     record.successful_requests = metrics.successful_requests
+    record.failed_requests = metrics.failed_requests
+    record.error_rate = metrics.error_rate
+    record.benchmark_duration_seconds = metrics.benchmark_duration_seconds
+    record.request_throughput_per_second = metrics.request_throughput_per_second
+    record.total_input_tokens = metrics.total_input_tokens
+    record.total_output_tokens = metrics.total_output_tokens
+    record.scored_requests = metrics.scored_requests
+    record.passed_requests = metrics.passed_requests
     record.p50_ttft_ms = metrics.p50_ttft_ms
     record.p95_ttft_ms = metrics.p95_ttft_ms
     record.p99_ttft_ms = metrics.p99_ttft_ms

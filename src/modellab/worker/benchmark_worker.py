@@ -25,20 +25,16 @@ from modellab.api.models import (
 from modellab.deployments import DeploymentManager, build_deployment_providers
 from modellab.storage import repositories
 from modellab.storage.database import get_session_factory
+from modellab.workloads import get_workload_registry
+from modellab.workloads.models import RegisteredWorkload
+from modellab.workloads.scoring import score_answer
 
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 REQUEST_TIMEOUT_SECONDS = 30.0
-SMOKE_TEST_PROMPTS = (
-    "Explain prefix caching in one sentence.",
-    "Why should a database session be closed after a request?",
-    "Write a short Python function that adds two integers.",
-)
-
-
 class BenchmarkExecutionError(RuntimeError):
-    """Raised when a benchmark cannot complete every scheduled request."""
+    """Raised when a benchmark cannot produce a usable result."""
 
 
 class BenchmarkWorker:
@@ -84,8 +80,17 @@ class BenchmarkWorker:
                     "The benchmark worker requires an OpenAI-compatible mock or vLLM engine."
                 )
 
+            workload = get_workload_registry().get(
+                run.workload_name, run.workload_version or "1.0.0"
+            )
+            if workload is None:
+                raise BenchmarkExecutionError("The evaluation run's workload no longer exists.")
+            if run.workload_hash and workload.content_hash != run.workload_hash:
+                raise BenchmarkExecutionError(
+                    "The workload definition changed after this evaluation was queued."
+                )
             metrics = await self._benchmark_openai_compatible_profile(
-                run, profile, deployment.endpoint_url
+                run, profile, deployment.endpoint_url, workload
             )
             with self._session_factory() as session:
                 completed_run = repositories.complete_evaluation_run(session, run.id, metrics)
@@ -117,18 +122,49 @@ class BenchmarkWorker:
                 await asyncio.sleep(poll_interval_seconds)
 
     async def _benchmark_openai_compatible_profile(
-        self, run: EvaluationRun, profile: ModelProfile, endpoint_url: str
+        self,
+        run: EvaluationRun,
+        profile: ModelProfile,
+        endpoint_url: str,
+        workload: RegisteredWorkload,
     ) -> EvaluationMetrics:
         semaphore = asyncio.Semaphore(min(run.concurrency, run.request_count))
-        started_at = time.perf_counter()
 
         async with httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT_SECONDS, transport=self._transport
         ) as client:
+            warmup_responses = await asyncio.gather(
+                *(
+                    self._send_request(
+                        client,
+                        semaphore,
+                        profile,
+                        endpoint_url,
+                        workload,
+                        warmup_index,
+                    )
+                    for warmup_index in range(run.warmup_request_count)
+                ),
+                return_exceptions=True,
+            )
+            warmup_failures = [
+                response for response in warmup_responses if isinstance(response, Exception)
+            ]
+            if warmup_failures:
+                raise BenchmarkExecutionError(
+                    f"{len(warmup_failures)} of {run.warmup_request_count} warm-up requests failed."
+                ) from warmup_failures[0]
+
+            started_at = time.perf_counter()
             responses = await asyncio.gather(
                 *(
                     self._send_request(
-                        client, semaphore, profile, endpoint_url, request_index
+                        client,
+                        semaphore,
+                        profile,
+                        endpoint_url,
+                        workload,
+                        request_index,
                     )
                     for request_index in range(run.request_count)
                 ),
@@ -136,19 +172,54 @@ class BenchmarkWorker:
             )
 
         elapsed_seconds = time.perf_counter() - started_at
-        failures = [response for response in responses if isinstance(response, Exception)]
-        if failures:
-            raise BenchmarkExecutionError(
-                f"{len(failures)} of {run.request_count} benchmark requests failed."
-            ) from failures[0]
+        request_results: list[EvaluationRequestMetrics] = []
+        for request_index, response in enumerate(responses):
+            case = workload.cases[request_index % len(workload.cases)]
+            if isinstance(response, Exception):
+                request_results.append(
+                    EvaluationRequestMetrics(
+                        request_index=request_index,
+                        case_id=case.id,
+                        success=False,
+                        error=str(response)[:2_000],
+                    )
+                )
+            else:
+                request_results.append(response)
 
-        request_results = [response for response in responses if not isinstance(response, Exception)]
-        ttft_samples = [result.ttft_ms for result in request_results]
-        end_to_end_samples = [result.end_to_end_latency_ms for result in request_results]
-        output_tokens = sum(result.completion_tokens for result in request_results)
+        successful_results = [result for result in request_results if result.success]
+        if not successful_results:
+            raise BenchmarkExecutionError(
+                f"All {run.request_count} measured benchmark requests failed."
+            )
+
+        ttft_samples = [result.ttft_ms for result in successful_results if result.ttft_ms is not None]
+        end_to_end_samples = [
+            result.end_to_end_latency_ms
+            for result in successful_results
+            if result.end_to_end_latency_ms is not None
+        ]
+        input_tokens = sum(result.input_tokens or 0 for result in successful_results)
+        output_tokens = sum(result.completion_tokens or 0 for result in successful_results)
+        quality_scores = [
+            result.quality_score
+            for result in successful_results
+            if result.quality_score is not None
+        ]
+        failed_requests = run.request_count - len(successful_results)
         return EvaluationMetrics(
             request_count=run.request_count,
-            successful_requests=len(request_results),
+            successful_requests=len(successful_results),
+            failed_requests=failed_requests,
+            error_rate=failed_requests / run.request_count,
+            benchmark_duration_seconds=elapsed_seconds,
+            request_throughput_per_second=(
+                len(successful_results) / elapsed_seconds if elapsed_seconds else 0.0
+            ),
+            total_input_tokens=input_tokens,
+            total_output_tokens=output_tokens,
+            scored_requests=len(quality_scores),
+            passed_requests=sum(score == 1.0 for score in quality_scores),
             p50_ttft_ms=_percentile(ttft_samples, 50),
             p95_ttft_ms=_percentile(ttft_samples, 95),
             p99_ttft_ms=_percentile(ttft_samples, 99),
@@ -156,6 +227,9 @@ class BenchmarkWorker:
             p95_end_to_end_latency_ms=_percentile(end_to_end_samples, 95),
             p99_end_to_end_latency_ms=_percentile(end_to_end_samples, 99),
             output_tokens_per_second=output_tokens / elapsed_seconds if elapsed_seconds else 0.0,
+            quality_score=(
+                sum(quality_scores) / len(quality_scores) if quality_scores else None
+            ),
             request_metrics=request_results,
         )
 
@@ -165,24 +239,26 @@ class BenchmarkWorker:
         semaphore: asyncio.Semaphore,
         profile: ModelProfile,
         endpoint_url: str,
+        workload: RegisteredWorkload,
         request_index: int,
     ) -> EvaluationRequestMetrics:
-        prompt = SMOKE_TEST_PROMPTS[request_index % len(SMOKE_TEST_PROMPTS)]
+        case = workload.cases[request_index % len(workload.cases)]
         payload = {
             "model": profile.model,
             "messages": [
-                {"role": "system", "content": "You are concise."},
-                {"role": "user", "content": prompt},
+                message.model_dump()
+                for message in (*workload.shared_messages, *case.messages)
             ],
-            "temperature": 0.0,
-            "max_tokens": 128,
+            **workload.generation.model_dump(exclude_none=True),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
         async with semaphore:
             request_started_at = time.perf_counter()
             first_token_at: float | None = None
+            prompt_tokens: int | None = None
             completion_tokens: int | None = None
+            generated_parts: list[str] = []
             saw_done = False
             async with client.stream("POST", endpoint_url, json=payload) as response:
                 response.raise_for_status()
@@ -197,9 +273,14 @@ class BenchmarkWorker:
                         break
                     event = json.loads(data)
                     usage = event.get("usage")
+                    if usage and usage.get("prompt_tokens") is not None:
+                        prompt_tokens = int(usage["prompt_tokens"])
                     if usage and usage.get("completion_tokens") is not None:
                         completion_tokens = int(usage["completion_tokens"])
-                    if first_token_at is None and _event_contains_output(event):
+                    output = _event_output(event)
+                    if output:
+                        generated_parts.append(output)
+                    if first_token_at is None and output:
                         first_token_at = time.perf_counter()
             request_finished_at = time.perf_counter()
 
@@ -218,34 +299,43 @@ class BenchmarkWorker:
 
         ttft_ms = (first_token_at - request_started_at) * 1_000
         end_to_end_latency_ms = (request_finished_at - request_started_at) * 1_000
+        generated_text = "".join(generated_parts)
         return EvaluationRequestMetrics(
             request_index=request_index,
+            case_id=case.id,
+            success=True,
             ttft_ms=ttft_ms,
             end_to_end_latency_ms=end_to_end_latency_ms,
+            input_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             output_tokens_per_second=(
                 completion_tokens / (end_to_end_latency_ms / 1_000)
                 if end_to_end_latency_ms
                 else 0.0
             ),
+            generated_text=generated_text,
+            quality_score=score_answer(generated_text, case.expected),
         )
 
 
-def _event_contains_output(event: object) -> bool:
+def _event_output(event: object) -> str:
     if not isinstance(event, dict):
-        return False
+        return ""
     choices = event.get("choices")
     if not isinstance(choices, list):
-        return False
+        return ""
+    output_parts: list[str] = []
     for choice in choices:
         if not isinstance(choice, dict):
             continue
         delta = choice.get("delta")
         if not isinstance(delta, dict):
             continue
-        if any(delta.get(field) for field in ("content", "reasoning_content")):
-            return True
-    return False
+        for field in ("content", "reasoning_content"):
+            value = delta.get(field)
+            if isinstance(value, str) and value:
+                output_parts.append(value)
+    return "".join(output_parts)
 
 
 def _percentile(samples: Sequence[float], percentile: int) -> float:
