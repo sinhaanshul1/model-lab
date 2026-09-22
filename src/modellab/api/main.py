@@ -290,6 +290,8 @@ def create_evaluation_run(
                 "value": {
                     "model_deployment_id": "00000000-0000-0000-0000-000000000001",
                     "workload_name": "smoke-test",
+                    "workload_version": "1.0.0",
+                    "warmup_request_count": 2,
                     "request_count": 10,
                     "concurrency": 2,
                 },
@@ -303,7 +305,10 @@ def create_evaluation_run(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model deployment not found")
     if deployment.status is not ModelDeploymentStatus.READY:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Model deployment is not ready")
-    return repositories.create_evaluation_run(session, payload)
+    workload = get_workload_registry().get(payload.workload_name, payload.workload_version)
+    if workload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workload not found")
+    return repositories.create_evaluation_run(session, payload, workload)
 
 
 @app.get("/v1/evaluation-runs", response_model=list[EvaluationRun], tags=["evaluation runs"])

@@ -23,6 +23,7 @@ from modellab.storage import repositories
 from modellab.deployments import DeploymentManager, MockDeploymentProvider
 from modellab.storage.database import create_schema, get_session_factory
 from modellab.worker.benchmark_worker import BenchmarkWorker
+from modellab.workloads import get_workload_registry
 
 
 TEST_DATABASE_URL = os.getenv(
@@ -65,6 +66,8 @@ def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID, UUID
         deployment = repositories.create_model_deployment(
             session, ModelDeploymentCreate(model_profile_id=profile.id)
         )
+        workload = get_workload_registry().get("smoke-test", "1.0.0")
+        assert workload is not None
         run = repositories.create_evaluation_run(
             session,
             EvaluationRunCreate(
@@ -73,6 +76,7 @@ def _create_profile_and_run(*, request_count: int = 4) -> tuple[UUID, UUID, UUID
                 request_count=request_count,
                 concurrency=2,
             ),
+            workload,
         )
     asyncio.run(_deployment_manager().start(deployment.id))
     return profile.id, deployment.id, run.id
@@ -140,6 +144,8 @@ def test_only_one_session_can_claim_each_queued_run() -> None:
 
     try:
         with session_factory() as session:
+            workload = get_workload_registry().get("smoke-test", "1.0.0")
+            assert workload is not None
             second_run = repositories.create_evaluation_run(
                 session,
                 EvaluationRunCreate(
@@ -148,6 +154,7 @@ def test_only_one_session_can_claim_each_queued_run() -> None:
                     request_count=2,
                     concurrency=1,
                 ),
+                workload,
             )
             second_run_id = second_run.id
 

@@ -19,6 +19,7 @@ from modellab.api.models import (
 )
 from modellab.storage import repositories
 from modellab.storage.database import create_schema, get_session_factory
+from modellab.workloads import get_workload_registry
 
 
 TEST_DATABASE_URL = os.getenv(
@@ -78,14 +79,19 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
             assert saved_profile.name == "postgres-storage-test-profile"
             assert saved_profile.engine is ServingEngine.MOCK
 
+            workload = get_workload_registry().get("smoke-test", "1.0.0")
+            assert workload is not None
             run = repositories.create_evaluation_run(
                 session,
                 EvaluationRunCreate(
                     model_deployment_id=deployment_id,
-                    workload_name="postgres-storage-test-workload",
+                    workload_name="smoke-test",
+                    workload_version="1.0.0",
+                    warmup_request_count=2,
                     request_count=12,
                     concurrency=3,
                 ),
+                workload,
             )
             run_id = run.id
 
@@ -95,6 +101,14 @@ def test_model_profile_and_evaluation_run_persist_then_are_cleaned_up() -> None:
             assert saved_run.model_profile_id == profile_id
             assert saved_run.model_deployment_id == deployment_id
             assert saved_run.request_count == 12
+            assert saved_run.workload_version == "1.0.0"
+            assert saved_run.workload_hash is not None
+            assert saved_run.generation_settings == {
+                "temperature": 0.0,
+                "max_tokens": 128,
+                "seed": 42,
+            }
+            assert saved_run.warmup_request_count == 2
             assert saved_run.metrics is None
     finally:
         with session_factory() as session:

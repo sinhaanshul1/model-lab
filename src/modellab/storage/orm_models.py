@@ -84,6 +84,10 @@ class EvaluationRunRecord(Base):
         index=True,
     )
     workload_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    workload_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    workload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generation_settings: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    warmup_request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     request_count: Mapped[int] = mapped_column(Integer, nullable=False)
     concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")

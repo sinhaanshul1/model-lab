@@ -129,6 +129,8 @@ class ModelDeployment(BaseModel):
 class EvaluationRunCreate(BaseModel):
     model_deployment_id: UUID
     workload_name: str = Field(default="smoke-test", min_length=1, max_length=100)
+    workload_version: str = Field(default="1.0.0", pattern=r"^\d+\.\d+\.\d+$")
+    warmup_request_count: int = Field(default=2, ge=0, le=10_000)
     request_count: int = Field(default=10, ge=1, le=100_000)
     concurrency: int = Field(default=1, ge=1, le=10_000)
 
@@ -160,6 +162,10 @@ class EvaluationRun(BaseModel):
     model_profile_id: UUID
     model_deployment_id: UUID | None = None
     workload_name: str
+    workload_version: str | None = None
+    workload_hash: str | None = None
+    generation_settings: dict[str, object] | None = None
+    warmup_request_count: int = 0
     request_count: int
     concurrency: int
     status: EvaluationRunStatus

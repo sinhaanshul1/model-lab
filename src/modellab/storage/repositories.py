@@ -25,6 +25,7 @@ from modellab.storage.orm_models import (
     ModelDeploymentRecord,
     ModelProfileRecord,
 )
+from modellab.workloads.models import RegisteredWorkload
 
 
 def to_model_profile(record: ModelProfileRecord) -> ModelProfile:
@@ -79,6 +80,10 @@ def to_evaluation_run(record: EvaluationRunRecord) -> EvaluationRun:
         model_profile_id=record.model_profile_id,
         model_deployment_id=record.model_deployment_id,
         workload_name=record.workload_name,
+        workload_version=record.workload_version,
+        workload_hash=record.workload_hash,
+        generation_settings=record.generation_settings,
+        warmup_request_count=record.warmup_request_count,
         request_count=record.request_count,
         concurrency=record.concurrency,
         status=EvaluationRunStatus(record.status),
@@ -245,7 +250,11 @@ def delete_model_deployment(session: Session, deployment_id: UUID) -> bool:
     return True
 
 
-def create_evaluation_run(session: Session, payload: EvaluationRunCreate) -> EvaluationRun:
+def create_evaluation_run(
+    session: Session,
+    payload: EvaluationRunCreate,
+    workload: RegisteredWorkload | None = None,
+) -> EvaluationRun:
     deployment = session.get(ModelDeploymentRecord, payload.model_deployment_id)
     if deployment is None:
         raise ValueError("Model deployment not found")
@@ -253,6 +262,12 @@ def create_evaluation_run(session: Session, payload: EvaluationRunCreate) -> Eva
         model_profile_id=deployment.model_profile_id,
         model_deployment_id=deployment.id,
         workload_name=payload.workload_name,
+        workload_version=workload.version if workload else payload.workload_version,
+        workload_hash=workload.content_hash if workload else None,
+        generation_settings=(
+            workload.generation.model_dump(mode="json") if workload else None
+        ),
+        warmup_request_count=payload.warmup_request_count,
         request_count=payload.request_count,
         concurrency=payload.concurrency,
         status=EvaluationRunStatus.QUEUED.value,

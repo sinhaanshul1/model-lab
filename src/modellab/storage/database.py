@@ -66,6 +66,10 @@ def create_schema(database_url: str | None = None) -> None:
             )
 
     metric_columns = {
+        "workload_version": "VARCHAR(32) NULL",
+        "workload_hash": "VARCHAR(64) NULL",
+        "generation_settings": "JSON NULL",
+        "warmup_request_count": "INTEGER NOT NULL DEFAULT 0",
         "p50_ttft_ms": "DOUBLE PRECISION NULL",
         "p99_ttft_ms": "DOUBLE PRECISION NULL",
         "p50_end_to_end_latency_ms": "DOUBLE PRECISION NULL",

@@ -94,7 +94,8 @@ def test_ephemeral_evaluation_lifecycle_from_api_to_cleanup() -> None:
                 "/v1/evaluation-runs",
                 json={
                     "model_deployment_id": str(deployment_id),
-                    "workload_name": "full-lifecycle-test",
+                    "workload_name": "smoke-test",
+                    "workload_version": "1.0.0",
                     "request_count": 3,
                     "concurrency": 2,
                 },
