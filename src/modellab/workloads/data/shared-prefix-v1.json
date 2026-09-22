@@ -1,0 +1,13 @@
+{
+  "name": "shared-prefix",
+  "version": "1.0.0",
+  "description": "Requests sharing a long prefix to expose prefix-caching effects.",
+  "generation": {"temperature": 0.0, "max_tokens": 96, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "You are analyzing an inference service. It accepts OpenAI-compatible chat requests, streams generated tokens, records time to first token and end-to-end latency, schedules concurrent sequences on a GPU, and may reuse cached attention states for identical prompt prefixes. Answer only from this description and keep the answer under three sentences."}],
+  "cases": [
+    {"id": "metrics", "messages": [{"role": "user", "content": "Which two latency measurements does the service record?"}]},
+    {"id": "cache", "messages": [{"role": "user", "content": "What can be reused when request prefixes are identical?"}]},
+    {"id": "protocol", "messages": [{"role": "user", "content": "Which API style does the service accept?"}]},
+    {"id": "scheduler", "messages": [{"role": "user", "content": "What hardware resource receives concurrent sequences?"}]}
+  ]
+}

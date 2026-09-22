@@ -1,0 +1,14 @@
+{
+  "name": "quality",
+  "version": "1.0.0",
+  "description": "Deterministically scored answers covering several output formats.",
+  "generation": {"temperature": 0.0, "max_tokens": 64, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "Follow the requested output format exactly and do not add explanation."}],
+  "cases": [
+    {"id": "arithmetic", "messages": [{"role": "user", "content": "What is 17 + 25? Return only the number."}], "expected": {"scorer": "numeric_tolerance", "value": 42, "tolerance": 0}},
+    {"id": "capital", "messages": [{"role": "user", "content": "What is the capital of France? Return only the city."}], "expected": {"scorer": "normalized_exact_match", "value": "Paris"}},
+    {"id": "multiple-choice", "messages": [{"role": "user", "content": "Which is a GPU? A) PostgreSQL B) NVIDIA A10G C) FastAPI. Return only the letter."}], "expected": {"scorer": "multiple_choice", "value": "B"}},
+    {"id": "contains", "messages": [{"role": "user", "content": "Name both latency metrics abbreviated as TTFT and E2E. Return only the abbreviations."}], "expected": {"scorer": "contains_all", "value": ["TTFT", "E2E"]}},
+    {"id": "json", "messages": [{"role": "user", "content": "Return a JSON object with ready set to true."}], "expected": {"scorer": "json_schema", "schema": {"type": "object", "required": ["ready"], "properties": {"ready": {"type": "boolean", "const": true}}}}}
+  ]
+}

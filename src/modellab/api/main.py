@@ -28,6 +28,8 @@ from modellab.storage import repositories
 from modellab.storage.database import get_session, get_session_factory
 from modellab.deployments import DeploymentManager, build_deployment_providers
 from modellab.deployments.manager import DeploymentLifecycleError
+from modellab.workloads import get_workload_registry
+from modellab.workloads.models import RegisteredWorkload, WorkloadSummary
 
 
 app = FastAPI(
@@ -81,6 +83,23 @@ def deterministic_mock_completion(payload: MockChatCompletionRequest) -> MockCha
 @app.get("/health", tags=["health"])
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/v1/workloads", response_model=list[WorkloadSummary], tags=["workloads"])
+def list_workloads() -> list[WorkloadSummary]:
+    return get_workload_registry().list()
+
+
+@app.get(
+    "/v1/workloads/{workload_name}/{workload_version}",
+    response_model=RegisteredWorkload,
+    tags=["workloads"],
+)
+def get_workload(workload_name: str, workload_version: str) -> RegisteredWorkload:
+    workload = get_workload_registry().get(workload_name, workload_version)
+    if workload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workload not found")
+    return workload
 
 
 @app.post(

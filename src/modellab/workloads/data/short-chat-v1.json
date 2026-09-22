@@ -1,0 +1,13 @@
+{
+  "name": "short-chat",
+  "version": "1.0.0",
+  "description": "Short conversational requests that exercise instruction following.",
+  "generation": {"temperature": 0.0, "max_tokens": 160, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "Be accurate and concise."}],
+  "cases": [
+    {"id": "summarize", "messages": [{"role": "user", "content": "Summarize this in one sentence: Batching improves GPU utilization by processing requests together."}]},
+    {"id": "steps", "messages": [{"role": "user", "content": "List three steps for debugging a slow API response."}]},
+    {"id": "rewrite", "messages": [{"role": "user", "content": "Rewrite politely: Send the report now."}]},
+    {"id": "compare", "messages": [{"role": "user", "content": "In two sentences, compare latency and throughput."}]}
+  ]
+}

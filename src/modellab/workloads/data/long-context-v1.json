@@ -1,0 +1,12 @@
+{
+  "name": "long-context",
+  "version": "1.0.0",
+  "description": "Longer supplied context for measuring prompt-processing latency.",
+  "generation": {"temperature": 0.0, "max_tokens": 128, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "Use only the supplied project notes. Project Atlas serves language models on GPU workers. Profiles select model, context limit, concurrency, quantization, and prefix caching. Deployments turn profiles into reachable OpenAI-compatible endpoints. Evaluation workers stream requests and record time to first token, end-to-end latency, output throughput, and deterministic quality results. Model weights are cached on persistent storage so instance restarts do not require every file to be downloaded again. Runtime containers are temporary and may be recreated. A deployment marked ephemeral is stopped after its evaluation completes. Warm-up requests initialize model execution but are excluded from reported measurements. Fair comparisons use the same workload version, request count, and concurrency. Each workload is immutable and identified by a content hash. Failed individual requests are retained so reliability can be compared instead of losing the entire experiment."}],
+  "cases": [
+    {"id": "persistence", "messages": [{"role": "user", "content": "What survives an instance restart and avoids repeated downloads?"}]},
+    {"id": "warmup", "messages": [{"role": "user", "content": "Are warm-up requests included in reported measurements?"}]},
+    {"id": "fairness", "messages": [{"role": "user", "content": "Name the three settings held constant for a fair comparison."}]}
+  ]
+}
