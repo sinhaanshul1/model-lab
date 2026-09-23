@@ -293,7 +293,7 @@ def create_evaluation_run(
                 "value": {
                     "model_deployment_id": "00000000-0000-0000-0000-000000000001",
                     "workload_name": "smoke-test",
-                    "workload_version": "1.0.0",
+                    "workload_version": "2.0.0",
                     "warmup_request_count": 2,
                     "request_count": 10,
                     "concurrency": 2,

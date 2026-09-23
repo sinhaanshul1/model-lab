@@ -1,0 +1,13 @@
+{
+  "name": "smoke-test",
+  "version": "2.0.0",
+  "description": "Fast end-to-end health check with short, varied prompts.",
+  "generation": {"temperature": 0.0, "max_tokens": 128, "seed": 42},
+  "cases": [
+    {"id": "explain-caching", "messages": [{"role": "user", "content": "Explain prefix caching in one sentence."}]},
+    {"id": "latency-tip", "messages": [{"role": "user", "content": "Give one practical way to reduce LLM serving latency."}]},
+    {"id": "json-shape", "messages": [{"role": "user", "content": "Return JSON with a boolean field named healthy set to true."}]},
+    {"id": "simple-math", "messages": [{"role": "user", "content": "What is 12 multiplied by 8? Answer briefly."}]},
+    {"id": "classification", "messages": [{"role": "user", "content": "Classify this sentiment as positive, negative, or neutral: The deployment completed successfully."}]}
+  ]
+}

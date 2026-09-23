@@ -1,0 +1,24 @@
+{
+  "name": "shared-prefix",
+  "version": "2.0.0",
+  "description": "Requests sharing a long prefix to expose prefix-caching effects.",
+  "generation": {"temperature": 0.0, "max_tokens": 96, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "You are analyzing an inference service called ModelLab. It accepts OpenAI-compatible chat requests on port 8000 and streams generated tokens using server-sent events. It records time to first token, end-to-end latency, output-token throughput, request throughput, and error rate. The scheduler places concurrent sequences on an NVIDIA GPU. Prefix caching may reuse cached attention states when prompt prefixes are identical. Model weights are downloaded from a model repository and cached on persistent EBS storage. PostgreSQL stores model profiles, deployments, evaluation runs, and metrics. Warm-up requests run before measurement and are excluded from results. Ephemeral deployments are stopped after evaluation. A worker claims queued evaluations, calls the selected deployment endpoint, and records per-request results. Quality cases use deterministic scorers. Fair comparisons keep workload content, request count, concurrency, and warm-up count identical. Answer only from this description and keep the answer under three sentences."}],
+  "cases": [
+    {"id": "metrics", "messages": [{"role": "user", "content": "Which two latency measurements does the service record?"}]},
+    {"id": "cache", "messages": [{"role": "user", "content": "What can be reused when request prefixes are identical?"}]},
+    {"id": "protocol", "messages": [{"role": "user", "content": "Which API style does the service accept?"}]},
+    {"id": "scheduler", "messages": [{"role": "user", "content": "What hardware resource receives concurrent sequences?"}]},
+    {"id": "port", "messages": [{"role": "user", "content": "Which port accepts chat requests?"}]},
+    {"id": "stream-protocol", "messages": [{"role": "user", "content": "Which streaming mechanism delivers generated tokens?"}]},
+    {"id": "storage", "messages": [{"role": "user", "content": "Where are downloaded model weights cached?"}]},
+    {"id": "database", "messages": [{"role": "user", "content": "Which database stores control-plane records?"}]},
+    {"id": "database-records", "messages": [{"role": "user", "content": "Name two record types stored in the database."}]},
+    {"id": "warmup", "messages": [{"role": "user", "content": "When do warm-up requests run and are they measured?"}]},
+    {"id": "ephemeral", "messages": [{"role": "user", "content": "What happens to an ephemeral deployment after evaluation?"}]},
+    {"id": "worker", "messages": [{"role": "user", "content": "Which component claims queued evaluations?"}]},
+    {"id": "quality", "messages": [{"role": "user", "content": "How are quality cases scored?"}]},
+    {"id": "fair-comparison", "messages": [{"role": "user", "content": "What must remain identical for a fair comparison?"}]},
+    {"id": "reliability", "messages": [{"role": "user", "content": "Which recorded metric represents request reliability?"}]}
+  ]
+}

@@ -17,8 +17,27 @@ def test_built_in_workloads_are_versioned_and_hashed() -> None:
         "long-context",
         "quality",
     }
-    assert all(workload.version == "1.0.0" for workload in workloads)
+    assert {workload.version for workload in workloads} == {"1.0.0", "2.0.0"}
     assert all(len(workload.content_hash) == 64 for workload in workloads)
+
+
+def test_expanded_workloads_keep_the_expected_unique_case_counts() -> None:
+    registry = WorkloadRegistry()
+    expected_counts = {
+        "smoke-test": 5,
+        "short-chat": 25,
+        "shared-prefix": 15,
+        "long-context": 15,
+        "quality": 52,
+    }
+
+    for name, expected_count in expected_counts.items():
+        workload = registry.get(name, "2.0.0")
+        assert workload is not None
+        assert len(workload.cases) == expected_count
+        assert len({case.id for case in workload.cases}) == expected_count
+
+    assert sum(expected_counts.values()) == 112
 
 
 def test_duplicate_case_ids_are_rejected(tmp_path: Path) -> None:

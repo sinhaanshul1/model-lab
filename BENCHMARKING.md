@@ -27,7 +27,7 @@ curl -sS http://127.0.0.1:8000/v1/evaluation-runs \
   -d '{
     "model_deployment_id": "YOUR_DEPLOYMENT_ID",
     "workload_name": "short-chat",
-    "workload_version": "1.0.0",
+    "workload_version": "2.0.0",
     "warmup_request_count": 5,
     "request_count": 100,
     "concurrency": 4

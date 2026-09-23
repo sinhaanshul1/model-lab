@@ -1,0 +1,24 @@
+{
+  "name": "long-context",
+  "version": "2.0.0",
+  "description": "Longer supplied context for measuring prompt-processing latency.",
+  "generation": {"temperature": 0.0, "max_tokens": 128, "seed": 42},
+  "shared_messages": [{"role": "system", "content": "Use only the supplied project notes. Project Atlas serves language models on GPU workers. Profiles select the model identifier, context limit, maximum concurrent sequences, quantization, and prefix caching. Deployments turn profiles into reachable OpenAI-compatible endpoints. The API container manages records, the worker container executes queued evaluations, PostgreSQL provides durable metadata, and a temporary vLLM container serves each deployed model. Evaluation workers request streamed responses and record time to first token, end-to-end latency, output-token throughput, request throughput, input tokens, output tokens, and deterministic quality results. Time to first token ends when the first nonempty generated content arrives, while end-to-end latency ends at the final done event. Model weights are downloaded from a model repository and cached on persistent EBS storage so instance restarts do not require every file to be downloaded again. Runtime containers are temporary and may be recreated. Instance-store storage is also temporary and disappears when the underlying instance is stopped or terminated. A deployment marked ephemeral is stopped after its evaluation completes. Warm-up requests initialize model execution but are excluded from reported measurements. Fair comparisons use the same workload content hash, measured request count, concurrency, and warm-up count. Each workload is immutable, versioned, and identified by a SHA-256 content hash. Failed individual requests are retained so reliability can be compared instead of losing the entire experiment. A run can succeed when some measured requests fail, but it fails when every measured request fails or warm-up fails. Generation settings include temperature, maximum output tokens, and an optional seed. Lower latency is better, while higher throughput and quality are better. Repeated trials help distinguish configuration effects from normal runtime variation."}],
+  "cases": [
+    {"id": "persistence", "messages": [{"role": "user", "content": "What survives an instance restart and avoids repeated downloads?"}]},
+    {"id": "warmup", "messages": [{"role": "user", "content": "Are warm-up requests included in reported measurements?"}]},
+    {"id": "fairness", "messages": [{"role": "user", "content": "Which settings are held constant for a fair comparison?"}]},
+    {"id": "containers", "messages": [{"role": "user", "content": "Name the three container roles described in the notes."}]},
+    {"id": "ttft-end", "messages": [{"role": "user", "content": "Which event ends the TTFT measurement?"}]},
+    {"id": "e2e-end", "messages": [{"role": "user", "content": "Which event ends the end-to-end latency measurement?"}]},
+    {"id": "instance-store", "messages": [{"role": "user", "content": "What happens to instance-store data when the instance is stopped?"}]},
+    {"id": "partial-failure", "messages": [{"role": "user", "content": "Can a run succeed when only some measured requests fail?"}]},
+    {"id": "total-failure", "messages": [{"role": "user", "content": "Give two conditions that make an evaluation fail."}]},
+    {"id": "generation", "messages": [{"role": "user", "content": "Which three generation settings are recorded?"}]},
+    {"id": "profile-settings", "messages": [{"role": "user", "content": "Name the five settings selected by a model profile."}]},
+    {"id": "metric-direction", "messages": [{"role": "user", "content": "For latency and throughput, which direction is better?"}]},
+    {"id": "repetition", "messages": [{"role": "user", "content": "Why should the same experiment be repeated?"}]},
+    {"id": "workload-identity", "messages": [{"role": "user", "content": "How is immutable workload content identified?"}]},
+    {"id": "token-metrics", "messages": [{"role": "user", "content": "Which two token totals does the worker retain?"}]}
+  ]
+}
