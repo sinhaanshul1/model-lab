@@ -352,15 +352,3 @@ experiment-results/         Raw A10G evidence and human-readable analysis
 ```
 
 For deeper methodology, see [`BENCHMARKING.md`](BENCHMARKING.md).
-
-## Resume-scale summary
-
-ModelLab demonstrates backend API design, durable async job processing, Docker
-runtime orchestration, GPU inference, streaming protocol handling, experiment
-design, statistical repetition, failure cleanup, and evidence-based performance
-analysis in one end-to-end system.
-
-## License
-
-No license has been added yet. Until one is chosen, the repository is not
-licensed for redistribution or reuse.
